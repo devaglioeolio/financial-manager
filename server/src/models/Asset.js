@@ -6,6 +6,10 @@ const transactionSchema = new mongoose.Schema({
     enum: ['BUY', 'SELL'],
     required: true
   },
+  quantity: {
+    type: Number,
+    required: true
+  },
   amount: {
     type: Number,
     required: true
