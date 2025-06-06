@@ -39,6 +39,7 @@
 import { ref, onMounted } from 'vue'
 import { Pie as PieChart, Line as LineChart } from 'vue-chartjs'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement } from 'chart.js'
+import GoalTracker from '@/components/GoalTracker.vue'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement)
 
