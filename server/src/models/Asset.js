@@ -53,6 +53,10 @@ const assetSchema = new mongoose.Schema({
     required: true,
     default: 0
   },
+  totalQuantity: {
+    type: Number,
+    default: 0
+  },
   currency: {
     type: String,
     default: 'KRW'
@@ -123,17 +127,36 @@ assetSchema.pre('save', function(next) {
   next();
 });
 
-// 평균 매수가 계산 메서드
+// 평균 매수가 계산 메서드 (원화 기준)
 assetSchema.methods.getAveragePurchasePrice = function() {
-  if (this.transactions.length === 0) return 0;
-  
-  const buyTransactions = this.transactions.filter(t => t.type === 'BUY');
-  if (buyTransactions.length === 0) return 0;
+  if (this.totalQuantity === 0) return 0;
+  if (this.currency === 'KRW') {
+    return this.amount / this.totalQuantity;
+  }
+  // 외화인 경우 원화로 변환
+  return (this.amount * (this.transactions[0]?.exchangeRate || 1)) / this.totalQuantity;
+};
 
-  const totalAmount = buyTransactions.reduce((sum, t) => sum + t.amount, 0);
-  const totalValue = buyTransactions.reduce((sum, t) => sum + (t.amount * t.price * t.exchangeRate), 0);
+// 원래 통화의 평균매수가 계산 메서드
+assetSchema.methods.getAveragePurchasePriceInOriginal = function() {
+  if (this.totalQuantity === 0) return 0;
+  return this.amount / this.totalQuantity;
+};
+
+// 원화 금액 계산 메서드
+assetSchema.methods.getAmountInKRW = function() {
+  if (this.currency === 'KRW') return this.amount;
   
-  return totalValue / totalAmount;
+  // 각 transaction의 환율을 고려하여 원화 금액 계산
+  return this.transactions.reduce((sum, t) => {
+    const value = t.amount * t.exchangeRate;
+    if (t.type === 'BUY') {
+      return sum + value;
+    } else if (t.type === 'SELL') {
+      return sum - value;
+    }
+    return sum;
+  }, 0);
 };
 
 // 현재 가치 계산 메서드 (실시간 가격은 외부 API에서 받아와야 함)

@@ -24,16 +24,14 @@
               <div v-for="asset in subCategory.assets" :key="asset.id" class="asset-item-card">
                 <div class="asset-info-row">
                   <span class="asset-name">{{ asset.name }}</span>
-                  <span v-if="getActualQuantity(asset)" class="quantity-label">{{ formatNumberInt(getActualQuantity(asset)) }}주</span>
+                  <span v-if="asset.totalQuantity" class="quantity-label">{{ formatNumberInt(asset.totalQuantity) }}주</span>
                 </div>
                 <div class="asset-amounts-block">
                   <div class="amounts-col">
                     <div class="asset-amount-row">
                       <span class="amount-krw">
                         ₩{{ formatNumberInt(subCategory.category === 'FOREIGN'
-                          ? (asset.transactions && asset.transactions.length > 0
-                            ? asset.transactions.reduce((sum, t) => sum + (t.amount * t.exchangeRate * (t.type === 'BUY' ? 1 : t.type === 'SELL' ? -1 : 0)), 0)
-                            : 0)
+                          ? asset.amountInKRW
                           : asset.amount
                         ) }}
                         <span v-if="subCategory.category === 'FOREIGN'" class="amount-usd-inline">
@@ -43,11 +41,17 @@
                     </div>
                   </div>
                   <span v-if="asset.averagePurchasePrice" class="purchase-price-inline">
-                    평균매수가: ₩{{ formatNumber(asset.averagePurchasePrice) }}
+                    평균매수가: ₩{{ formatNumberInt(subCategory.category === 'FOREIGN'
+                      ? asset.averagePurchasePrice
+                      : asset.averagePurchasePrice
+                    ) }}
+                    <span v-if="subCategory.category === 'FOREIGN'" class="purchase-price-usd-inline">
+                      ( ${{ formatNumber(asset.averagePurchasePriceInOriginal) }} )
+                    </span>
                   </span>
                 </div>
-                <div v-if="getActualQuantity(asset)" class="quantity-subtext">
-                  보유수량: {{ formatNumberInt(getActualQuantity(asset)) }}주
+                <div v-if="asset.totalQuantity" class="quantity-subtext">
+                  보유수량: {{ formatNumberInt(asset.totalQuantity) }}주
                 </div>
               </div>
             </div>
@@ -94,15 +98,6 @@ const formatNumberInt = (number) => {
   return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 }).format(number)
 }
 
-// 실제 보유수량 계산 함수
-const getActualQuantity = (asset) => {
-  if (!asset.transactions || asset.transactions.length === 0) return 0;
-  return asset.transactions.reduce((sum, t) => {
-    if (t.type === 'BUY') return sum + t.quantity;
-    if (t.type === 'SELL') return sum - t.quantity;
-    return sum;
-  }, 0);
-}
 
 const fetchAssets = async () => {
   try {
@@ -281,6 +276,13 @@ onMounted(() => {
   font-size: 1.15em;
 }
 .amount-usd-inline {
+  color: #888;
+  font-size: 0.98em;
+  font-weight: 500;
+  margin-left: 0.3em;
+}
+
+.purchase-price-usd-inline {
   color: #888;
   font-size: 0.98em;
   font-weight: 500;

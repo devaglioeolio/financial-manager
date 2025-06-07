@@ -38,27 +38,23 @@ exports.getAssets = async (req, res) => {
         details: asset.details
       };
 
-      // STOCK과 CRYPTO만 평균 매수가 포함
+      // STOCK과 CRYPTO만 평균 매수가와 totalQuantity 포함
       if (mainCategory === 'STOCK' || mainCategory === 'CRYPTO') {
+        // 원화 기준 평균매수가
         assetInfo.averagePurchasePrice = asset.getAveragePurchasePrice();
+        assetInfo.totalQuantity = asset.totalQuantity;
+        
+        // FOREIGN 카테고리인 경우 원래 통화의 평균매수가 추가
+        if (subCategory === 'FOREIGN') {
+          assetInfo.averagePurchasePriceInOriginal = asset.getAveragePurchasePriceInOriginal();
+          assetInfo.amountInKRW = asset.getAmountInKRW();
+        }
       }
 
       acc[mainCategory].subCategories[subCategory].assets.push(assetInfo);
       
-      // totalAmount 계산
-      let assetTotal = asset.amount;
-      if (subCategory === 'FOREIGN') {
-        assetTotal = asset.transactions.reduce((sum, t) => {
-          const value = t.amount * t.exchangeRate;
-          if (t.type === 'BUY') {
-            return sum + value;
-          } else if (t.type === 'SELL') {
-            return sum - value;
-          } else {
-            return sum;
-          }
-        }, 0);
-      }
+      // totalAmount 계산 (원화 기준)
+      let assetTotal = subCategory === 'FOREIGN' ? asset.getAmountInKRW() : asset.amount;
 
       acc[mainCategory].totalAmount += assetTotal;
       acc[mainCategory].subCategories[subCategory].totalAmount += assetTotal;
@@ -137,6 +133,7 @@ exports.addAsset = async (req, res) => {
       const totalAmount = amount || (quantity * price);
       
       assetData.amount = totalAmount;
+      assetData.totalQuantity = quantity;  // totalQuantity 설정
       assetData.transactions = [{
         type: 'BUY',
         quantity,
@@ -205,6 +202,11 @@ exports.addTransaction = async (req, res) => {
     const transactionAmount = amount || (quantity * price);
     const transactionPrice = price || (transactionAmount / quantity);
 
+    // 매도 시 보유 수량 체크
+    if (type.toUpperCase() === 'SELL' && asset.totalQuantity < quantity) {
+      return res.status(400).json({ message: '보유 수량보다 많은 수량을 매도할 수 없습니다.' });
+    }
+
     // 거래 추가
     asset.transactions.push({
       type: type.toUpperCase(),
@@ -218,11 +220,13 @@ exports.addTransaction = async (req, res) => {
     // 보유 수량과 총액 업데이트
     if (type.toUpperCase() === 'BUY') {
       asset.amount += transactionAmount;
+      asset.totalQuantity += quantity;
     } else if (type.toUpperCase() === 'SELL') {
       if (asset.amount < transactionAmount) {
         return res.status(400).json({ message: '보유 금액보다 많은 금액을 매도할 수 없습니다.' });
       }
       asset.amount -= transactionAmount;
+      asset.totalQuantity -= quantity;
     }
 
     await asset.save();
