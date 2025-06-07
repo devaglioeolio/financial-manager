@@ -475,4 +475,52 @@ exports.getDailyAssets = async (req, res) => {
       error: error.message 
     });
   }
+};
+
+// 최근 거래 내역 조회 
+//MARK: 전체 거래내역 조회는는 비효율적으로 보이니 추후 수정필요
+exports.getRecentTransactions = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10; // 기본 10개
+    const assets = await Asset.find({ userId: req.user.id });
+    
+    // 모든 자산의 거래 내역을 하나의 배열로 합치기
+    const allTransactions = [];
+    
+    assets.forEach(asset => {
+      asset.transactions.forEach(transaction => {
+        allTransactions.push({
+          _id: transaction._id,
+          assetName: asset.name,
+          assetId: asset._id,
+          mainCategory: asset.mainCategory,
+          subCategory: asset.subCategory,
+          type: transaction.type,
+          quantity: transaction.quantity,
+          amount: transaction.amount,
+          price: transaction.price,
+          exchangeRate: transaction.exchangeRate,
+          date: transaction.date,
+          currency: asset.currency
+        });
+      });
+    });
+    
+    // 날짜순으로 정렬 (최신순)
+    allTransactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    // 제한된 개수만 반환
+    const recentTransactions = allTransactions.slice(0, limit);
+    
+    res.json({
+      transactions: recentTransactions,
+      total: allTransactions.length
+    });
+  } catch (error) {
+    console.error('최근 거래 내역 조회 에러:', error);
+    res.status(500).json({ 
+      message: '최근 거래 내역 조회 중 오류가 발생했습니다.',
+      error: error.message 
+    });
+  }
 }; 

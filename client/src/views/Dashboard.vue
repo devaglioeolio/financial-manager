@@ -59,8 +59,25 @@
       </div>
       
       <div class="chart-container asset-detail-container">
-        <h3>자산 상세</h3>
-        <div class="asset-list">
+        <div class="detail-header">
+          <div class="detail-tabs">
+            <button 
+              :class="['detail-tab-btn', { active: activeDetailTab === 'assets' }]"
+              @click="activeDetailTab = 'assets'"
+            >
+              자산 상세
+            </button>
+            <button 
+              :class="['detail-tab-btn', { active: activeDetailTab === 'transactions' }]"
+              @click="activeDetailTab = 'transactions'"
+            >
+              최근 거래
+            </button>
+          </div>
+        </div>
+        
+        <!-- 자산 상세 탭 -->
+        <div v-if="activeDetailTab === 'assets'" class="asset-list">
           <div v-for="category in categories" :key="category.category" class="category-section">
             <h4 class="category-title">{{ category.categoryName }}</h4>
             <div v-for="subCategory in category.subCategories" :key="subCategory.category" class="subcategory-section">
@@ -101,6 +118,59 @@
             </div>
           </div>
         </div>
+        
+        <!-- 최근 거래 탭 -->
+        <div v-if="activeDetailTab === 'transactions'" class="transactions-list">
+          <div v-if="recentTransactions.length === 0" class="no-transactions">
+            <div class="empty-state">
+              <span class="empty-icon">📊</span>
+              <p>아직 거래 내역이 없습니다</p>
+            </div>
+          </div>
+          <div v-else class="transaction-timeline">
+            <div 
+              v-for="transaction in recentTransactions" 
+              :key="transaction._id"
+              class="transaction-card"
+              :class="transaction.type.toLowerCase()"
+            >
+              <div class="transaction-indicator">
+                <span class="transaction-icon">
+                  {{ transaction.type === 'BUY' ? '📈' : '📉' }}
+                </span>
+              </div>
+              <div class="transaction-content">
+                <div class="transaction-header">
+                  <h4 class="asset-name">{{ transaction.assetName }}</h4>
+                  <span class="transaction-type" :class="transaction.type.toLowerCase()">
+                    {{ transaction.type === 'BUY' ? '매수' : '매도' }}
+                  </span>
+                </div>
+                <div class="transaction-details">
+                  <div class="detail-row">
+                    <span class="label">수량:</span>
+                    <span class="value">{{ formatNumberInt(transaction.quantity) }}주</span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="label">단가:</span>
+                    <span class="value">
+                      {{ transaction.currency === 'KRW' ? '₩' : '$' }}{{ formatNumber(transaction.price) }}
+                    </span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="label">총액:</span>
+                    <span class="value amount" :class="transaction.type.toLowerCase()">
+                      {{ transaction.currency === 'KRW' ? '₩' : '$' }}{{ formatNumber(transaction.amount) }}
+                    </span>
+                  </div>
+                </div>
+                <div class="transaction-date">
+                  {{ formatTransactionDate(transaction.date) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -118,6 +188,8 @@ const totalAmount = ref(0)
 const categories = ref([])
 const activeTab = ref('monthly')
 const selectedDays = ref(7)
+const activeDetailTab = ref('assets')
+const recentTransactions = ref([])
 
 const dayOptions = [
   { value: 7, label: '7일' },
@@ -298,10 +370,42 @@ const fetchDailyAssets = async () => {
   }
 }
 
+const fetchRecentTransactions = async () => {
+  try {
+    const response = await axios.get('/api/assets/transactions/recent?limit=15')
+    const { transactions } = response.data
+    recentTransactions.value = transactions
+  } catch (error) {
+    console.error('최근 거래 내역 조회 실패:', error)
+  }
+}
+
+const formatTransactionDate = (date) => {
+  const transactionDate = new Date(date)
+  const now = new Date()
+  const diffTime = Math.abs(now - transactionDate)
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+  
+  if (diffDays === 1) {
+    return '오늘'
+  } else if (diffDays === 2) {
+    return '어제'
+  } else if (diffDays <= 7) {
+    return `${diffDays - 1}일 전`
+  } else {
+    return transactionDate.toLocaleDateString('ko-KR', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  }
+}
+
 onMounted(() => {
   fetchAssets()
   fetchMonthlyAssets()
   fetchDailyAssets()
+  fetchRecentTransactions()
 })
 </script>
 
@@ -575,5 +679,220 @@ onMounted(() => {
   border-radius: 8px;
   transition: transform 0.3s ease;
   z-index: 1;
+}
+
+/* 상세 영역 탭 스타일 */
+.detail-header {
+  margin-bottom: 1.5rem;
+}
+
+.detail-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.detail-tab-btn {
+  padding: 0.75rem 1.5rem;
+  border: 2px solid #e0e0e0;
+  background: white;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #666;
+  transition: all 0.3s ease;
+}
+
+.detail-tab-btn:hover {
+  border-color: #2196F3;
+  color: #2196F3;
+  transform: translateY(-1px);
+}
+
+.detail-tab-btn.active {
+  background: #2196F3;
+  border-color: #2196F3;
+  color: white;
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
+}
+
+/* 최근 거래 스타일 */
+.transactions-list {
+  max-height: 600px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.no-transactions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 400px;
+}
+
+.empty-state {
+  text-align: center;
+  color: #999;
+}
+
+.empty-icon {
+  font-size: 3rem;
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.transaction-timeline {
+  position: relative;
+}
+
+.transaction-timeline::before {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(to bottom, #e0e0e0, #f0f0f0);
+}
+
+.transaction-card {
+  position: relative;
+  display: flex;
+  margin-bottom: 1.5rem;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  transition: all 0.3s ease;
+  border-left: 4px solid transparent;
+}
+
+.transaction-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+.transaction-card.buy {
+  border-left-color: #4CAF50;
+}
+
+.transaction-card.sell {
+  border-left-color: #f44336;
+}
+
+.transaction-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  position: relative;
+  z-index: 2;
+}
+
+.transaction-icon {
+  font-size: 1.5rem;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.transaction-content {
+  flex: 1;
+  padding: 1.25rem 1.5rem;
+}
+
+.transaction-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.asset-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0;
+}
+
+.transaction-type {
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.transaction-type.buy {
+  background: rgba(76, 175, 80, 0.1);
+  color: #4CAF50;
+}
+
+.transaction-type.sell {
+  background: rgba(244, 67, 54, 0.1);
+  color: #f44336;
+}
+
+.transaction-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.detail-row .label {
+  font-size: 0.8rem;
+  color: #999;
+  font-weight: 500;
+}
+
+.detail-row .value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.detail-row .value.amount.buy {
+  color: #4CAF50;
+}
+
+.detail-row .value.amount.sell {
+  color: #f44336;
+}
+
+.transaction-date {
+  font-size: 0.85rem;
+  color: #999;
+  font-weight: 500;
+}
+
+/* 스크롤바 커스터마이징 */
+.transactions-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.transactions-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.transactions-list::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.transactions-list::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 </style> 

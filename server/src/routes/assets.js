@@ -15,6 +15,9 @@ router.get('/monthly', assetController.getMonthlyAssets);
 // 일별 자산 현황 조회
 router.get('/daily', assetController.getDailyAssets);
 
+// 최근 거래 내역 조회
+router.get('/transactions/recent', assetController.getRecentTransactions);
+
 // 자산 추가
 router.post('/', assetController.addAsset);
 
