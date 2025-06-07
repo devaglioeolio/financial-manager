@@ -295,4 +295,168 @@ exports.deleteAsset = async (req, res) => {
       error: error.message 
     });
   }
+};
+
+// 월별 자산 현황 조회
+exports.getMonthlyAssets = async (req, res) => {
+  try {
+    const assets = await Asset.find({ userId: req.user.id });
+    
+    // 현재 날짜부터 과거 6개월 데이터 생성
+    const monthlyData = [];
+    const now = new Date();
+    
+    for (let i = 5; i >= 0; i--) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      
+      let monthlyTotal = 0;
+      
+      assets.forEach(asset => {
+        // 자산 생성일이 해당 월보다 이전인 경우만 계산
+        if (asset.createdAt <= nextMonth) {
+          // 해당 월까지의 거래만 고려하여 자산 가치 계산
+          let assetValue = 0;
+          let quantity = 0;
+          
+          if (asset.mainCategory === 'STOCK' || asset.mainCategory === 'CRYPTO') {
+            // 주식/코인은 거래 내역 기반으로 계산
+            asset.transactions.forEach(transaction => {
+              if (transaction.date <= nextMonth) {
+                if (transaction.type === 'BUY') {
+                  assetValue += transaction.amount;
+                  quantity += transaction.quantity;
+                } else if (transaction.type === 'SELL') {
+                  // 비례적으로 감소
+                  const ratio = transaction.quantity / quantity;
+                  assetValue -= assetValue * ratio;
+                  quantity -= transaction.quantity;
+                }
+              }
+            });
+          } else {
+            // 다른 자산은 단순히 현재 값 사용
+            assetValue = asset.amount;
+          }
+          
+          // 외화 자산인 경우 원화로 환산
+          if (asset.subCategory === 'FOREIGN') {
+            // 가장 최근 환율 사용 (실제로는 해당 시점의 환율을 사용해야 함)
+            const latestTransaction = asset.transactions[asset.transactions.length - 1];
+            const exchangeRate = latestTransaction ? latestTransaction.exchangeRate : 1;
+            assetValue = assetValue * exchangeRate;
+          }
+          
+          monthlyTotal += assetValue;
+        }
+      });
+      
+      monthlyData.push({
+        month: targetDate.toISOString().substring(0, 7), // YYYY-MM 형식
+        monthName: targetDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' }),
+        totalAmount: Math.round(monthlyTotal)
+      });
+    }
+    
+    res.json({
+      monthlyData,
+      currentTotal: monthlyData[monthlyData.length - 1]?.totalAmount || 0
+    });
+  } catch (error) {
+    console.error('월별 자산 현황 조회 에러:', error);
+    res.status(500).json({ 
+      message: '월별 자산 현황 조회 중 오류가 발생했습니다.',
+      error: error.message 
+    });
+  }
+};
+
+// 일별 자산 현황 조회
+exports.getDailyAssets = async (req, res) => {
+  try {
+    const assets = await Asset.find({ userId: req.user.id });
+    
+    // 쿼리 파라미터에서 일자 수 가져오기 (기본값: 7일)
+    const days = parseInt(req.query.days) || 7;
+    
+    // 최대 90일로 제한
+    const maxDays = Math.min(days, 90);
+    
+    const dailyData = [];
+    const now = new Date();
+    
+    for (let i = maxDays - 1; i >= 0; i--) {
+      const targetDate = new Date();
+      targetDate.setDate(now.getDate() - i);
+      targetDate.setHours(23, 59, 59, 999); // 해당 일의 마지막 시점
+      
+      const nextDay = new Date(targetDate);
+      nextDay.setDate(targetDate.getDate() + 1);
+      nextDay.setHours(0, 0, 0, 0); // 다음 날의 시작
+      
+      let dailyTotal = 0;
+      
+      assets.forEach(asset => {
+        // 자산 생성일이 해당 일보다 이전인 경우만 계산
+        if (asset.createdAt <= nextDay) {
+          // 해당 일까지의 거래만 고려하여 자산 가치 계산
+          let assetValue = 0;
+          let quantity = 0;
+          
+          if (asset.mainCategory === 'STOCK' || asset.mainCategory === 'CRYPTO') {
+            // 주식/코인은 거래 내역 기반으로 계산
+            asset.transactions.forEach(transaction => {
+              if (transaction.date <= nextDay) {
+                if (transaction.type === 'BUY') {
+                  assetValue += transaction.amount;
+                  quantity += transaction.quantity;
+                } else if (transaction.type === 'SELL') {
+                  // 비례적으로 감소
+                  if (quantity > 0) {
+                    const ratio = transaction.quantity / quantity;
+                    assetValue -= assetValue * ratio;
+                    quantity -= transaction.quantity;
+                  }
+                }
+              }
+            });
+          } else {
+            // 다른 자산은 단순히 현재 값 사용
+            assetValue = asset.amount;
+          }
+          
+          // 외화 자산인 경우 원화로 환산
+          if (asset.subCategory === 'FOREIGN') {
+            // 가장 최근 환율 사용 (실제로는 해당 시점의 환율을 사용해야 함)
+            const latestTransaction = asset.transactions[asset.transactions.length - 1];
+            const exchangeRate = latestTransaction ? latestTransaction.exchangeRate : 1;
+            assetValue = assetValue * exchangeRate;
+          }
+          
+          dailyTotal += assetValue;
+        }
+      });
+      
+      dailyData.push({
+        date: targetDate.toISOString().substring(0, 10), // YYYY-MM-DD 형식
+        dateDisplay: targetDate.toLocaleDateString('ko-KR', { 
+          month: 'short', 
+          day: 'numeric',
+          weekday: 'short'
+        }),
+        totalAmount: Math.round(dailyTotal)
+      });
+    }
+    
+    res.json({
+      dailyData,
+      currentTotal: dailyData[dailyData.length - 1]?.totalAmount || 0
+    });
+  } catch (error) {
+    console.error('일별 자산 현황 조회 에러:', error);
+    res.status(500).json({ 
+      message: '일별 자산 현황 조회 중 오류가 발생했습니다.',
+      error: error.message 
+    });
+  }
 }; 
