@@ -307,8 +307,14 @@ exports.getMonthlyAssets = async (req, res) => {
     const now = new Date();
     
     for (let i = 5; i >= 0; i--) {
-      const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const nextMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      // 더 안전한 날짜 생성 방식
+      const targetDate = new Date(now);
+      targetDate.setMonth(now.getMonth() - i);
+      targetDate.setDate(1);
+      targetDate.setHours(0, 0, 0, 0);
+      
+      const nextMonth = new Date(targetDate);
+      nextMonth.setMonth(targetDate.getMonth() + 1);
       
       let monthlyTotal = 0;
       
@@ -351,9 +357,17 @@ exports.getMonthlyAssets = async (req, res) => {
         }
       });
       
+      // 일관된 날짜 정보 생성
+      const year = targetDate.getFullYear();
+      const month = targetDate.getMonth() + 1;
+      const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+      
+      // month 필드도 동일한 방식으로 생성
+      const monthString = `${year}-${month.toString().padStart(2, '0')}`;
+      
       monthlyData.push({
-        month: targetDate.toISOString().substring(0, 7), // YYYY-MM 형식
-        monthName: targetDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' }),
+        month: monthString,
+        monthName: `${year}년 ${monthNames[month - 1]}`,
         totalAmount: Math.round(monthlyTotal)
       });
     }
@@ -437,13 +451,15 @@ exports.getDailyAssets = async (req, res) => {
         }
       });
       
+      // 일자 표시 직접 매핑
+      const month = targetDate.getMonth() + 1;
+      const day = targetDate.getDate();
+      const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+      const weekday = weekdays[targetDate.getDay()];
+      
       dailyData.push({
         date: targetDate.toISOString().substring(0, 10), // YYYY-MM-DD 형식
-        dateDisplay: targetDate.toLocaleDateString('ko-KR', { 
-          month: 'short', 
-          day: 'numeric',
-          weekday: 'short'
-        }),
+        dateDisplay: `${month}/${day}(${weekday})`,
         totalAmount: Math.round(dailyTotal)
       });
     }
