@@ -1,10 +1,12 @@
 <template>
   <div class="dashboard">
     <div class="dashboard-header">
-      <h1>자산 현황</h1>
-      <div class="total-assets">
-        <h2>총 자산</h2>
-        <p class="amount">₩{{ formatNumberInt(totalAmount) }}</p>
+      <div class="header-main">
+        <h1>자산 현황</h1>
+        <div class="total-assets">
+          <h2>총 자산</h2>
+          <p class="amount">₩{{ formatNumberInt(totalAmount) }}</p>
+        </div>
       </div>
     </div>
 
@@ -14,22 +16,27 @@
         <PieChart :data="pieChartData" :options="chartOptions" />
       </div>
       
-      <div class="chart-container">
+      <div class="chart-container chart-with-widget">
         <div class="chart-header">
           <h3>자산 증감 현황</h3>
-          <div class="chart-tabs">
-            <button 
-              :class="['tab-btn', { active: activeTab === 'monthly' }]"
-              @click="activeTab = 'monthly'"
-            >
-              월별
-            </button>
-            <button 
-              :class="['tab-btn', { active: activeTab === 'daily' }]"
-              @click="activeTab = 'daily'"
-            >
-              일별
-            </button>
+          <div class="chart-controls">
+            <div class="chart-tabs">
+              <button 
+                :class="['tab-btn', { active: activeTab === 'monthly' }]"
+                @click="activeTab = 'monthly'"
+              >
+                월별
+              </button>
+              <button 
+                :class="['tab-btn', { active: activeTab === 'daily' }]"
+                @click="activeTab = 'daily'"
+              >
+                일별
+              </button>
+            </div>
+            <div class="header-widget">
+              <ExchangeRateWidget />
+            </div>
           </div>
         </div>
         <div v-if="activeTab === 'daily'" class="daily-options-container">
@@ -181,6 +188,7 @@ import { ref, onMounted, computed } from 'vue'
 import { Pie as PieChart, Line as LineChart } from 'vue-chartjs'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement } from 'chart.js'
 import axios from 'axios'
+import ExchangeRateWidget from '../components/ExchangeRateWidget.vue'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement)
 
@@ -418,12 +426,17 @@ onMounted(() => {
   margin-bottom: 2rem;
 }
 
+.header-main {
+  width: 100%;
+}
+
 .total-assets {
   margin-top: 1rem;
   padding: 1.5rem;
-  background: #f8f9fa;
+  background: white;
   border-radius: 12px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  border: 1px solid #f0f0f0;
 }
 
 .amount {
@@ -447,6 +460,51 @@ onMounted(() => {
   height: 450px;
   display: flex;
   flex-direction: column;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.chart-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.header-widget {
+  flex: 0 0 auto;
+}
+
+.tab-btn {
+  padding: 0.5rem 1rem;
+  border: 2px solid #e0e0e0;
+  background: white;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #666;
+  transition: all 0.3s ease;
+}
+
+.tab-btn:hover {
+  border-color: #2196F3;
+  color: #2196F3;
+}
+
+.tab-btn.active {
+  background: #2196F3;
+  border-color: #2196F3;
+  color: white;
 }
 
 /* 자산 상세 컨테이너만 높이 확장 및 전체 너비 사용 */
@@ -568,41 +626,6 @@ onMounted(() => {
   font-size: 0.98em;
   font-weight: 500;
   margin-left: 0.3em;
-}
-
-.chart-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.chart-tabs {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.tab-btn {
-  padding: 0.5rem 1rem;
-  border: 2px solid #e0e0e0;
-  background: white;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: #666;
-  transition: all 0.3s ease;
-}
-
-.tab-btn:hover {
-  border-color: #2196F3;
-  color: #2196F3;
-}
-
-.tab-btn.active {
-  background: #2196F3;
-  border-color: #2196F3;
-  color: white;
 }
 
 .chart-wrapper {
@@ -773,11 +796,11 @@ onMounted(() => {
 }
 
 .transaction-card.buy {
-  border-left-color: #4CAF50;
+  border-left-color: #f44336;
 }
 
 .transaction-card.sell {
-  border-left-color: #f44336;
+  border-left-color: #2196F3;
 }
 
 .transaction-indicator {
@@ -829,13 +852,13 @@ onMounted(() => {
 }
 
 .transaction-type.buy {
-  background: rgba(76, 175, 80, 0.1);
-  color: #4CAF50;
+  background: rgba(244, 67, 54, 0.1);
+  color: #f44336;
 }
 
 .transaction-type.sell {
-  background: rgba(244, 67, 54, 0.1);
-  color: #f44336;
+  background: rgba(33, 150, 243, 0.1);
+  color: #2196F3;
 }
 
 .transaction-details {
@@ -864,11 +887,11 @@ onMounted(() => {
 }
 
 .detail-row .value.amount.buy {
-  color: #4CAF50;
+  color: #f44336;
 }
 
 .detail-row .value.amount.sell {
-  color: #f44336;
+  color: #2196F3;
 }
 
 .transaction-date {

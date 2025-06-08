@@ -1,4 +1,5 @@
 const Asset = require('../models/Asset');
+const { getExchangeRatesWithChange, initializeExchangeRates } = require('../services/exchangeRateService');
 
 // 자산 목록 조회
 exports.getAssets = async (req, res) => {
@@ -520,6 +521,55 @@ exports.getRecentTransactions = async (req, res) => {
     console.error('최근 거래 내역 조회 에러:', error);
     res.status(500).json({ 
       message: '최근 거래 내역 조회 중 오류가 발생했습니다.',
+      error: error.message 
+    });
+  }
+};
+
+// 환율 정보 조회
+exports.getExchangeRates = async (req, res) => {
+  try {
+    const exchangeRates = await getExchangeRatesWithChange();
+    
+    if (exchangeRates.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '저장된 환율 데이터가 없습니다.'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: exchangeRates,
+      lastUpdate: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('환율 정보 조회 에러:', error);
+    res.status(500).json({ 
+      success: false,
+      message: '환율 정보 조회 중 오류가 발생했습니다.',
+      error: error.message 
+    });
+  }
+};
+
+// 환율 데이터 초기화 (개발용)
+exports.initializeExchangeRates = async (req, res) => {
+  try {
+    const results = await initializeExchangeRates();
+
+    res.json({
+      success: true,
+      message: '환율 초기 데이터 저장이 완료되었습니다.',
+      data: results
+    });
+
+  } catch (error) {
+    console.error('환율 데이터 초기화 에러:', error);
+    res.status(500).json({ 
+      success: false,
+      message: '환율 데이터 초기화 중 오류가 발생했습니다.',
       error: error.message 
     });
   }

@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 const authRoutes = require('./routes/auth');
 const assetRoutes = require('./routes/assets');
 const goalRoutes = require('./routes/goalRoutes');
+const { startExchangeRateScheduler } = require('./schedulers/exchangeRateScheduler');
 
 // 환경변수 설정
 dotenv.config();
@@ -19,7 +20,7 @@ app.use(cookieParser());
 
 // CORS 설정
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true
 }));
 
@@ -49,7 +50,12 @@ mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => console.log('MongoDB 연결 성공'))
+.then(() => {
+  console.log('MongoDB 연결 성공');
+  
+  // 환율 데이터 자동 업데이트 스케줄러 시작
+  startExchangeRateScheduler();
+})
 .catch((err) => console.error('MongoDB 연결 실패:', err));
 
 app.listen(PORT, () => {

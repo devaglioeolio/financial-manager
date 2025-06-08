@@ -18,6 +18,12 @@ router.get('/daily', assetController.getDailyAssets);
 // 최근 거래 내역 조회
 router.get('/transactions/recent', assetController.getRecentTransactions);
 
+// 환율 정보 조회
+router.get('/exchange-rates', assetController.getExchangeRates);
+
+// 환율 데이터 초기화 (개발용)
+router.post('/exchange-rates/initialize', assetController.initializeExchangeRates);
+
 // 자산 추가
 router.post('/', assetController.addAsset);
 
