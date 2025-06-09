@@ -24,6 +24,9 @@ router.get('/exchange-rates', assetController.getExchangeRates);
 // 환율 데이터 초기화 (개발용)
 router.post('/exchange-rates/initialize', assetController.initializeExchangeRates);
 
+// 해외주식 실시간 수익률 조회
+router.get('/foreign-stock-returns', assetController.getForeignStockReturns);
+
 // 자산 추가
 router.post('/', assetController.addAsset);
 

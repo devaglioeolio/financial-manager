@@ -1,5 +1,6 @@
 const Asset = require('../models/Asset');
 const { getExchangeRatesWithChange, initializeExchangeRates } = require('../services/exchangeRateService');
+const { calculateStockReturns } = require('../services/stockPriceService');
 
 // 자산 목록 조회
 exports.getAssets = async (req, res) => {
@@ -570,6 +571,36 @@ exports.initializeExchangeRates = async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: '환율 데이터 초기화 중 오류가 발생했습니다.',
+      error: error.message 
+    });
+  }
+};
+
+// 해외주식 실시간 수익률 조회
+exports.getForeignStockReturns = async (req, res) => {
+  try {
+    console.log('해외주식 실시간 수익률 조회 시작...');
+    
+    // 사용자의 모든 자산 조회
+    const assets = await Asset.find({ userId: req.user.id });
+    
+    // 해외주식 실시간 수익률 계산
+    const stockReturns = await calculateStockReturns(assets);
+    
+    console.log(`해외주식 수익률 계산 완료: ${stockReturns.length}개 종목`);
+    
+    res.json({
+      success: true,
+      data: stockReturns,
+      count: stockReturns.length,
+      lastUpdate: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('해외주식 수익률 조회 에러:', error);
+    res.status(500).json({ 
+      success: false,
+      message: '해외주식 수익률 조회 중 오류가 발생했습니다.',
       error: error.message 
     });
   }

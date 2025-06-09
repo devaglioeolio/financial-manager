@@ -1,4 +1,5 @@
 const axios = require('axios');
+const https = require('https');
 const ExchangeRate = require('../models/ExchangeRate');
 
 // 저장할 통화 목록
@@ -44,14 +45,28 @@ const fetchExchangeRatesFromAPI = async (searchDate) => {
       throw new Error('KOREAEXIM_APIKEY가 환경변수에 설정되지 않았습니다.');
     }
 
+    console.log(`API Key 길이: ${apiKey.length}`);
+    console.log(`검색 날짜: ${searchDate}`);
+    
     const url = `https://www.koreaexim.go.kr/site/program/financial/exchangeJSON?authkey=${apiKey}&searchdate=${searchDate}&data=AP01`;
     
-    console.log(`환율 API 호출: ${url}`);
+    console.log(`환율 API 호출: ${url.replace(apiKey, '***API_KEY***')}`); // API 키 숨김
+    
+    // 원복: 기본 axios.get만 사용
     const response = await axios.get(url);
+    
+    console.log(`API 응답 상태: ${response.status}`);
+    console.log(`API 응답 데이터 타입: ${typeof response.data}`);
+    console.log(`API 응답 데이터 길이: ${Array.isArray(response.data) ? response.data.length : 'N/A'}`);
     
     return response.data;
   } catch (error) {
     console.error('환율 API 호출 실패:', error.message);
+    if (error.response) {
+      console.error('응답 상태:', error.response.status);
+      console.error('응답 헤더:', error.response.headers);
+      console.error('응답 데이터:', error.response.data);
+    }
     throw error;
   }
 };
@@ -62,16 +77,16 @@ const fetchExchangeRatesFromAPI = async (searchDate) => {
 const saveExchangeRates = async (data, date) => {
   try {
     if (!Array.isArray(data) || data.length === 0) {
-      console.log(`${date}: 환율 데이터가 비어있습니다. 저장하지 않습니다.`);
-      return { success: false, message: '데이터가 비어있음' };
+      console.log(`${date}: [경고] 환율 데이터가 비어있습니다. 저장하지 않습니다.`);
+      return { success: false, message: 'API 데이터 없음', data: [] };
     }
 
     // 저장할 통화만 필터링
     const filteredData = data.filter(item => TARGET_CURRENCIES.includes(item.cur_unit));
     
     if (filteredData.length === 0) {
-      console.log(`${date}: 저장할 통화가 없습니다.`);
-      return { success: false, message: '저장할 통화가 없음' };
+      console.log(`${date}: [경고] 저장할 통화가 없습니다.`);
+      return { success: false, message: '저장할 통화가 없음', data: [] };
     }
 
     const savedRates = [];
@@ -108,6 +123,10 @@ const saveExchangeRates = async (data, date) => {
       }
     }
 
+    if (savedRates.length === 0) {
+      return { success: false, message: '실제 저장된 통화 없음', data: [] };
+    }
+
     return { 
       success: true, 
       message: `${savedRates.length}개 통화 저장 완료`,
@@ -130,35 +149,43 @@ const fetchAndSaveExchangeRates = async (targetDate) => {
     console.log(`${dateStr} 환율 데이터 가져오기 시작`);
     
     const data = await fetchExchangeRatesFromAPI(dateStr);
+    if (!Array.isArray(data) || data.length === 0) {
+      console.log(`${dateStr}: [경고] API에서 환율 데이터가 오지 않았습니다. 저장하지 않습니다.`);
+      return { success: false, message: 'API 데이터 없음', data: [] };
+    }
     const result = await saveExchangeRates(data, dateStr);
     
-    console.log(`${dateStr} 환율 데이터 처리 완료:`, result.message);
+    if (!result.success) {
+      console.log(`${dateStr}: [경고] 환율 데이터 저장 실패 또는 저장할 데이터 없음.`);
+    } else {
+      console.log(`${dateStr} 환율 데이터 처리 완료:`, result.message);
+    }
     return result;
     
   } catch (error) {
     console.error('환율 데이터 가져오기/저장 실패:', error.message);
-    throw error;
+    return { success: false, message: error.message, data: [] };
   }
 };
 
 /**
  * 가장 최근 환율 데이터 조회
+ * 오늘 날짜 데이터가 없으면 명확히 안내
  */
 const getLatestExchangeRates = async () => {
   try {
-    // 가장 최근 날짜 조회
-    const latestDate = await ExchangeRate.findOne()
-      .sort({ date: -1 })
-      .select('date');
-
+    const today = formatDateForAPI(new Date());
+    // 오늘 날짜 데이터가 있으면 우선 반환
+    let rates = await ExchangeRate.find({ date: today }).sort({ curUnit: 1 });
+    if (rates.length > 0) {
+      return rates;
+    }
+    // 오늘 데이터가 없으면 가장 최근 날짜 데이터 반환
+    const latestDate = await ExchangeRate.findOne().sort({ date: -1 }).select('date');
     if (!latestDate) {
       throw new Error('저장된 환율 데이터가 없습니다.');
     }
-
-    // 해당 날짜의 모든 환율 데이터 조회
-    const rates = await ExchangeRate.find({ date: latestDate.date })
-      .sort({ curUnit: 1 });
-
+    rates = await ExchangeRate.find({ date: latestDate.date }).sort({ curUnit: 1 });
     return rates;
   } catch (error) {
     console.error('최신 환율 데이터 조회 실패:', error.message);
@@ -261,10 +288,66 @@ const initializeExchangeRates = async () => {
   }
 };
 
+/**
+ * 오늘 날짜 환율 데이터 존재 여부 확인
+ */
+const checkTodayExchangeRatesExist = async () => {
+  try {
+    const today = formatDateForAPI(new Date());
+    const count = await ExchangeRate.countDocuments({ date: today });
+    return count > 0;
+  } catch (error) {
+    console.error('오늘 환율 데이터 확인 실패:', error.message);
+    return false;
+  }
+};
+
+/**
+ * 서버 시작 시 오늘 환율 데이터 체크 및 가져오기
+ * 오후 2시 이후이고 오늘 데이터가 없으면 가져옴
+ */
+const checkAndFetchTodayExchangeRates = async () => {
+  try {
+    const now = new Date();
+    const hour = now.getHours();
+    
+    console.log('서버 시작 시 환율 데이터 체크 시작...');
+    
+    // 오전 11시 이전이면 아직 환율이 업데이트되지 않았으므로 체크하지 않음
+    if (hour < 11) {
+      console.log('오전 11시 이전이므로 환율 데이터 체크를 건너뜁니다.');
+      return { success: false, message: '너무 이른 시간' };
+    }
+    
+    const todayExists = await checkTodayExchangeRatesExist();
+    
+    if (todayExists) {
+      console.log('오늘 환율 데이터가 이미 존재합니다.');
+      return { success: true, message: '이미 존재함' };
+    }
+    
+    console.log('오늘 환율 데이터가 없습니다. 가져오기 시작...');
+    const result = await fetchAndSaveExchangeRates(now);
+    
+    if (result.success) {
+      console.log('서버 시작 시 환율 데이터 가져오기 성공:', result.message);
+    } else {
+      console.log('서버 시작 시 환율 데이터 가져오기 실패:', result.message);
+    }
+    
+    return result;
+    
+  } catch (error) {
+    console.error('서버 시작 시 환율 데이터 체크 실패:', error.message);
+    return { success: false, message: error.message };
+  }
+};
+
 module.exports = {
   fetchAndSaveExchangeRates,
   getLatestExchangeRates,
   getExchangeRatesWithChange,
   initializeExchangeRates,
-  formatDateForAPI
+  formatDateForAPI,
+  checkAndFetchTodayExchangeRates
 }; 

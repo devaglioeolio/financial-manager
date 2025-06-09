@@ -50,11 +50,11 @@ mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => {
+.then(async () => {
   console.log('MongoDB 연결 성공');
   
   // 환율 데이터 자동 업데이트 스케줄러 시작
-  startExchangeRateScheduler();
+  await startExchangeRateScheduler();
 })
 .catch((err) => console.error('MongoDB 연결 실패:', err));
 

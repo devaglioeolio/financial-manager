@@ -180,6 +180,14 @@
         </div>
       </div>
     </div>
+
+    <!-- 위젯 섹션 -->
+    <div class="widgets-section">
+      <div class="widgets-grid">
+        <ExchangeRateWidget />
+        <ForeignStockWidget />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -189,6 +197,7 @@ import { Pie as PieChart, Line as LineChart } from 'vue-chartjs'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement } from 'chart.js'
 import axios from 'axios'
 import ExchangeRateWidget from '../components/ExchangeRateWidget.vue'
+import ForeignStockWidget from '../components/ForeignStockWidget.vue'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement)
 
@@ -917,5 +926,21 @@ onMounted(() => {
 
 .transactions-list::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
+}
+
+/* 위젯 섹션 스타일 */
+.widgets-section {
+  margin-top: 2rem;
+  padding: 2rem;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  border: 1px solid #f0f0f0;
+}
+
+.widgets-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2rem;
 }
 </style> 
