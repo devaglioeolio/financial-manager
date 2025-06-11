@@ -28,7 +28,9 @@ const STOCK_SYMBOL_MAPPING = {
   '제이피모건(JPM)': 'JPM',
   'Bank of America': 'BAC',
   'Wells Fargo': 'WFC',
-  '콘스텔레이션 에너지(CEG)': 'CEG'
+  '콘스텔레이션 에너지(CEG)': 'CEG',
+  '금ETF(SPDR)':'GLD',
+  '미국단기채ETF(SGOV)':'SGOV'
 };
 
 /**

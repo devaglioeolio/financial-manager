@@ -6,7 +6,9 @@ const cookieParser = require('cookie-parser');
 const authRoutes = require('./routes/auth');
 const assetRoutes = require('./routes/assets');
 const goalRoutes = require('./routes/goalRoutes');
+const assetSnapshotRoutes = require('./routes/assetSnapshots');
 const { startExchangeRateScheduler } = require('./schedulers/exchangeRateScheduler');
+const { startDailySnapshotScheduler } = require('./schedulers/dailySnapshotScheduler');
 
 // 환경변수 설정
 dotenv.config();
@@ -28,6 +30,7 @@ app.use(cors({
 app.use('/api/auth', authRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/goals', goalRoutes);
+app.use('/api/asset-snapshots', assetSnapshotRoutes);
 
 // 기본 라우트 핸들러
 app.get('/', (req, res) => {
@@ -45,6 +48,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: '서버 에러가 발생했습니다.' });
 });
 
+
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; //unable to verify the first certificate 에러 해결
+
 // MongoDB 연결
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -55,6 +61,9 @@ mongoose.connect(process.env.MONGO_URI, {
   
   // 환율 데이터 자동 업데이트 스케줄러 시작
   await startExchangeRateScheduler();
+  
+  // 일별 자산 스냅샷 스케줄러 시작
+  await startDailySnapshotScheduler();
 })
 .catch((err) => console.error('MongoDB 연결 실패:', err));
 

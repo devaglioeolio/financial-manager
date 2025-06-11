@@ -13,7 +13,12 @@ router.get('/', assetController.getAssets);
 router.get('/monthly', assetController.getMonthlyAssets);
 
 // 일별 자산 현황 조회
-router.get('/daily', assetController.getDailyAssets);
+// 기존 방식 - 단순 생성일자 기준 sum (문제 있음)
+// router.get('/daily', assetController.getDailyAssets);
+
+// 새로운 방식 - 환율/주가 반영된 스냅샷 기반
+const assetSnapshotController = require('../controllers/assetSnapshotController');
+router.get('/daily', assetSnapshotController.getDailyAssetChanges);
 
 // 최근 거래 내역 조회
 router.get('/transactions/recent', assetController.getRecentTransactions);
