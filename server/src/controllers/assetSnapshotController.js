@@ -1,5 +1,5 @@
 const DailyAssetSnapshot = require('../models/DailyAssetSnapshot');
-const { createDailySnapshot, createHistoricalSnapshots } = require('../services/dailySnapshotService');
+const { createDailySnapshot } = require('../services/dailySnapshotService');
 const Asset = require('../models/Asset');
 const { getExchangeRatesWithChange } = require('../services/exchangeRateService');
 const { calculateStockReturns } = require('../services/stockPriceService');
@@ -107,38 +107,7 @@ const calculateTodayAssets = async (userId) => {
   }
 };
 
-// 히스토리 스냅샷 생성 (관리자용)
-exports.createHistoricalSnapshots = async (req, res) => {
-  try {
-    const { startDate, endDate } = req.body;
-    const userId = req.user.id;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        message: 'startDate와 endDate를 제공해주세요.'
-      });
-    }
-
-    console.log(`Creating historical snapshots from ${startDate} to ${endDate} for user ${userId}`);
-
-    const results = await createHistoricalSnapshots(userId, startDate, endDate);
-
-    res.json({
-      success: true,
-      message: '히스토리 스냅샷 생성이 완료되었습니다.',
-      data: results
-    });
-
-  } catch (error) {
-    console.error('히스토리 스냅샷 생성 실패:', error);
-    res.status(500).json({
-      success: false,
-      message: '히스토리 스냅샷 생성에 실패했습니다.',
-      error: error.message
-    });
-  }
-};
 
 // 특정 날짜 스냅샷 수동 생성
 exports.createSnapshot = async (req, res) => {

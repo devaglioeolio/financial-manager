@@ -5,7 +5,14 @@
         <h1>자산 현황</h1>
         <div class="total-assets">
           <h2>총 자산</h2>
-          <p class="amount">₩{{ formatNumberInt(totalAmount) }}</p>
+          <p class="amount">₩{{ formatNumberInt(calculatedTotalAmount) }}</p>
+          <div v-if="hasRealTimeData" class="realtime-indicator">
+            <span class="realtime-icon">🔄</span>
+            <span class="realtime-text">실시간 반영</span>
+          </div>
+          <button v-if="categories.length > 0" @click="fetchRealTimeData" class="refresh-realtime-btn">
+            실시간 데이터 새로고침
+          </button>
         </div>
       </div>
     </div>
@@ -13,7 +20,7 @@
     <div class="dashboard-grid">
       <div class="chart-container">
         <h3>자산 분포</h3>
-        <PieChart :data="pieChartData" :options="chartOptions" />
+        <PieChart :data="calculatedPieChartData" :options="chartOptions" />
       </div>
       
       <div class="chart-container chart-with-widget">
@@ -85,7 +92,7 @@
         
         <!-- 자산 상세 탭 -->
         <div v-if="activeDetailTab === 'assets'" class="asset-list">
-          <div v-for="category in categories" :key="category.category" class="category-section">
+          <div v-for="category in calculatedAssets" :key="category.category" class="category-section">
             <h4 class="category-title">{{ category.categoryName }}</h4>
             <div v-for="subCategory in category.subCategories" :key="subCategory.category" class="subcategory-section">
               <h5 class="subcategory-title">{{ subCategory.categoryName }}</h5>
@@ -98,13 +105,20 @@
                   <div class="amounts-col">
                     <div class="asset-amount-row">
                       <span class="amount-krw">
-                        ₩{{ formatNumberInt(subCategory.category === 'FOREIGN'
-                          ? asset.amountInKRW
-                          : asset.amount
+                        ₩{{ formatNumberInt(
+                          asset.hasRealTimeData ? asset.currentAmountInKRW : 
+                          (subCategory.category === 'FOREIGN' ? asset.amountInKRW : asset.amount)
                         ) }}
                         <span v-if="subCategory.category === 'FOREIGN'" class="amount-usd-inline">
-                          ( ${{ formatNumber(asset.amount) }} )
+                          ( ${{ formatNumber(asset.hasRealTimeData ? asset.currentAmount : asset.amount) }} )
                         </span>
+                      </span>
+                      <!-- 평가손익 표시 (해외주식만) -->
+                      <span v-if="asset.hasRealTimeData && asset.unrealizedGainKRW" 
+                            class="unrealized-gain" 
+                            :class="{ 'profit': asset.unrealizedGainKRW > 0, 'loss': asset.unrealizedGainKRW < 0 }">
+                        {{ asset.unrealizedGainKRW > 0 ? '+' : '' }}₩{{ formatNumberInt(Math.abs(asset.unrealizedGainKRW)) }}
+                        ({{ asset.returnRate > 0 ? '+' : '' }}{{ asset.returnRate.toFixed(2) }}%)
                       </span>
                     </div>
                   </div>
@@ -115,6 +129,10 @@
                     ) }}
                     <span v-if="subCategory.category === 'FOREIGN'" class="purchase-price-usd-inline">
                       ( ${{ formatNumber(asset.averagePurchasePriceInOriginal) }} )
+                    </span>
+                    <!-- 실시간 주가 표시 (해외주식만) -->
+                    <span v-if="asset.hasRealTimeData && asset.currentPrice" class="current-price-inline">
+                      | 현재가: ${{ formatNumber(asset.currentPrice) }}
                     </span>
                   </span>
                 </div>
@@ -539,6 +557,9 @@ ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointE
 
 const totalAmount = ref(0)
 const categories = ref([])
+const hasRealTimeData = ref(false)
+const realTimeStockData = ref({})
+const realTimeExchangeRates = ref({})
 const activeTab = ref('monthly')
 const selectedDays = ref(7)
 const activeDetailTab = ref('assets')
@@ -603,6 +624,37 @@ const dayOptions = [
   { value: 14, label: '14일' },
   { value: 30, label: '30일' }
 ]
+
+// 실시간 데이터가 적용된 파이 차트 데이터
+const calculatedPieChartData = computed(() => {
+  const subCats = []
+  calculatedAssets.value.forEach(cat => {
+    cat.subCategories.forEach(sub => {
+      const totalAmount = sub.assets.reduce((total, asset) => {
+        if (asset.hasRealTimeData) {
+          return total + asset.currentAmountInKRW
+        } else if (sub.category === 'FOREIGN') {
+          return total + (asset.amountInKRW || 0)
+        } else {
+          return total + (asset.amount || 0)
+        }
+      }, 0)
+      
+      subCats.push({
+        categoryName: sub.categoryName,
+        totalAmount: totalAmount
+      })
+    })
+  })
+  
+  return {
+    labels: subCats.map(sub => sub.categoryName),
+    datasets: [{
+      data: subCats.map(sub => sub.totalAmount),
+      backgroundColor: ['#4CAF50', '#2196F3', '#FFC107', '#9C27B0', '#E91E63', '#00BCD4', '#FF5722', '#795548']
+    }]
+  }
+})
 
 const pieChartData = ref({
   labels: [],
@@ -707,6 +759,66 @@ const segmentIndicatorStyle = computed(() => {
   }
 })
 
+// 실시간 데이터를 적용한 계산된 자산 정보
+const calculatedAssets = computed(() => {
+  if (!hasRealTimeData.value) return categories.value
+
+  return categories.value.map(category => ({
+    ...category,
+    subCategories: category.subCategories.map(subCategory => ({
+      ...subCategory,
+      assets: subCategory.assets.map(asset => {
+        if (subCategory.category === 'FOREIGN' && asset.totalQuantity) {
+          const stockData = realTimeStockData.value[asset.id]
+          const usdRate = realTimeExchangeRates.value['USD']
+          
+          if (stockData && usdRate) {
+            // 실시간 현재가치 (USD)
+            const currentAmount = asset.totalQuantity * stockData.currentPrice
+            // 평가손익 (USD)
+            const unrealizedGain = currentAmount - asset.amount
+            const returnRate = (unrealizedGain / asset.amount) * 100
+            // 원화 환산
+            const currentAmountInKRW = currentAmount * usdRate
+            const unrealizedGainKRW = unrealizedGain * usdRate
+            
+            return {
+              ...asset,
+              currentAmount,
+              currentPrice: stockData.currentPrice,
+              unrealizedGain,
+              unrealizedGainKRW,
+              returnRate,
+              currentAmountInKRW,
+              currentExchangeRate: usdRate,
+              hasRealTimeData: true
+            }
+          }
+        }
+        return { ...asset, hasRealTimeData: false }
+      })
+    }))
+  }))
+})
+
+// 실시간 데이터가 적용된 총 자산 계산
+const calculatedTotalAmount = computed(() => {
+  if (!hasRealTimeData.value) return totalAmount.value
+
+  return calculatedAssets.value.reduce((total, category) => {
+    return total + category.subCategories.reduce((catTotal, subCategory) => {
+      return catTotal + subCategory.assets.reduce((subTotal, asset) => {
+        if (asset.hasRealTimeData) {
+          return subTotal + asset.currentAmountInKRW
+        } else if (subCategory.category === 'FOREIGN') {
+          return subTotal + asset.amountInKRW
+        } else {
+          return subTotal + asset.amount
+        }
+      }, 0)
+    }, 0)
+  }, 0)
+})
 
 const fetchAssets = async () => {
   try {
@@ -735,6 +847,50 @@ const fetchAssets = async () => {
   }
 }
 
+// 실시간 데이터 가져오기
+const fetchRealTimeData = async () => {
+  try {
+    // 환율과 해외주식 데이터를 병렬로 가져오기
+    const [exchangeRatesResponse, stockReturnsResponse] = await Promise.all([
+      axios.get('/api/assets/exchange-rates').catch(err => {
+        console.warn('환율 정보 조회 실패:', err.message)
+        return { data: { success: false, data: [] } }
+      }),
+      axios.get('/api/assets/foreign-stock-returns').catch(err => {
+        console.warn('해외주식 정보 조회 실패:', err.message)
+        return { data: { success: false, data: [] } }
+      })
+    ])
+
+    // 환율 데이터 처리
+    if (exchangeRatesResponse.data.success) {
+      const exchangeRateMap = {}
+      exchangeRatesResponse.data.data.forEach(rate => {
+        exchangeRateMap[rate.currency] = rate.rate
+      })
+      realTimeExchangeRates.value = exchangeRateMap
+    }
+
+    // 해외주식 데이터 처리
+    if (stockReturnsResponse.data.success) {
+      const stockDataMap = {}
+      stockReturnsResponse.data.data.forEach(stock => {
+        if (!stock.error) {
+          stockDataMap[stock.assetId] = stock
+        }
+      })
+      realTimeStockData.value = stockDataMap
+    }
+
+    // 실시간 데이터가 있으면 플래그 설정
+    hasRealTimeData.value = Object.keys(realTimeStockData.value).length > 0
+
+  } catch (error) {
+    console.error('실시간 데이터 조회 실패:', error)
+    hasRealTimeData.value = false
+  }
+}
+
 const fetchMonthlyAssets = async () => {
   try {
     const response = await axios.get('/api/assets/monthly')
@@ -758,14 +914,28 @@ const fetchMonthlyAssets = async () => {
 
 const fetchDailyAssets = async () => {
   try {
-    const response = await axios.get(`/api/assets/daily?days=${selectedDays.value}`)
-    const { dailyData } = response.data
+    const response = await axios.get(`/api/asset-snapshots/daily-changes?days=${selectedDays.value}`)
+    const { data: dailyData } = response.data
+    
+    // 날짜 표시 형식 변환
+    const formattedData = dailyData.map(item => {
+      const date = new Date(item.date);
+      const month = date.getMonth() + 1;
+      const day = date.getDate();
+      const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+      const weekday = weekdays[date.getDay()];
+      
+      return {
+        ...item,
+        dateDisplay: `${month}/${day}(${weekday})`
+      };
+    });
     
     dailyChartData.value = {
-      labels: dailyData.map(data => data.dateDisplay),
+      labels: formattedData.map(data => data.dateDisplay),
       datasets: [{
         label: '총 자산',
-        data: dailyData.map(data => data.totalAmount),
+        data: formattedData.map(data => data.totalAmount),
         borderColor: '#4CAF50',
         backgroundColor: 'rgba(76, 175, 80, 0.1)',
         tension: 0.4,
@@ -1055,6 +1225,7 @@ onMounted(() => {
   fetchMonthlyAssets()
   fetchDailyAssets()
   fetchRecentTransactions()
+  fetchRealTimeData()
 })
 </script>
 
@@ -1085,6 +1256,50 @@ onMounted(() => {
   font-weight: bold;
   color: #2c3e50;
   margin-top: 0.5rem;
+}
+
+.realtime-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+
+.realtime-icon {
+  font-size: 0.9rem;
+  animation: spin 2s linear infinite;
+}
+
+.realtime-text {
+  font-size: 0.85rem;
+  color: #4CAF50;
+  font-weight: 600;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.refresh-realtime-btn {
+  margin-top: 0.8rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, #4CAF50, #45a049);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(76, 175, 80, 0.2);
+}
+
+.refresh-realtime-btn:hover {
+  background: linear-gradient(135deg, #45a049, #4CAF50);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
 }
 
 .dashboard-grid {
@@ -1267,6 +1482,34 @@ onMounted(() => {
   font-size: 0.98em;
   font-weight: 500;
   margin-left: 0.3em;
+}
+
+.current-price-inline {
+  color: #666;
+  font-size: 0.95em;
+  font-weight: 500;
+  margin-left: 0.3em;
+}
+
+.unrealized-gain {
+  font-size: 0.95em;
+  font-weight: 600;
+  margin-top: 0.3em;
+  padding: 0.2em 0.5em;
+  border-radius: 6px;
+  display: inline-block;
+}
+
+.unrealized-gain.profit {
+  color: #d32f2f;
+  background-color: #ffebee;
+  border: 1px solid #ffcdd2;
+}
+
+.unrealized-gain.loss {
+  color: #1976d2;
+  background-color: #e3f2fd;
+  border: 1px solid #bbdefb;
 }
 
 .chart-wrapper {

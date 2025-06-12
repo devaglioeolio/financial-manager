@@ -257,51 +257,9 @@ const createYesterdaySnapshotsForAllUsers = async () => {
   }
 };
 
-/**
- * 특정 기간의 히스토리 스냅샷을 생성합니다
- */
-const createHistoricalSnapshots = async (userId, startDate, endDate) => {
-  try {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const results = [];
 
-    for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
-      const targetDate = date.toISOString().split('T')[0];
-      
-      try {
-        // 히스토리 데이터는 실시간 API 호출하지 않음
-        const snapshot = await createDailySnapshot(userId, targetDate, false);
-        if (snapshot) {
-          results.push({
-            date: targetDate,
-            totalAsset: snapshot.totalAssetKRW,
-            success: true
-          });
-        }
-        
-        // 약간의 지연만 추가 (DB 부하 방지)
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-      } catch (error) {
-        console.error(`Failed to create snapshot for ${targetDate}:`, error);
-        results.push({
-          date: targetDate,
-          error: error.message,
-          success: false
-        });
-      }
-    }
-
-    return results;
-  } catch (error) {
-    console.error('Error in createHistoricalSnapshots:', error);
-    throw error;
-  }
-};
 
 module.exports = {
   createDailySnapshot,
-  createYesterdaySnapshotsForAllUsers,
-  createHistoricalSnapshots
+  createYesterdaySnapshotsForAllUsers
 }; 
