@@ -9,6 +9,7 @@ const goalRoutes = require('./routes/goalRoutes');
 const assetSnapshotRoutes = require('./routes/assetSnapshots');
 const { startExchangeRateScheduler } = require('./schedulers/exchangeRateScheduler');
 const { startDailySnapshotScheduler } = require('./schedulers/dailySnapshotScheduler');
+const tokenManager = require('./services/koreaInvestmentToken');
 
 // 환경변수 설정
 dotenv.config();
@@ -64,6 +65,9 @@ mongoose.connect(process.env.MONGO_URI, {
   
   // 일별 자산 스냅샷 스케줄러 시작
   await startDailySnapshotScheduler();
+  
+  // 한국투자증권 토큰 초기화 (10초 지연)
+  tokenManager.initializeTokens();
 })
 .catch((err) => console.error('MongoDB 연결 실패:', err));
 
