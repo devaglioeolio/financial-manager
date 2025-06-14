@@ -3,7 +3,8 @@ const Token = require('../models/Token');
 
 class KoreaInvestmentTokenManager {
     constructor() {
-        this.tokenExpiryTime = 24 * 60 * 60 * 1000; // 24시간을 밀리초로 변환
+        // 기존 24시간 fallback은 유지하되, 실제 만료시간을 우선 사용
+        this.tokenExpiryTime = 24 * 60 * 60 * 1000; // 24시간을 밀리초로 변환 (fallback용)
     }
 
     async getRestToken() {
@@ -36,9 +37,41 @@ class KoreaInvestmentTokenManager {
 
     shouldUpdateToken(tokenData) {
         if (!tokenData) return true;
+        
         const now = new Date();
+        
+        // 실제 토큰 만료시간이 있는 경우 이를 우선 사용
+        if (tokenData.expiresAt) {
+            const isExpired = now >= tokenData.expiresAt;
+            if (isExpired) {
+                console.log(`토큰이 만료되었습니다. 만료시간: ${tokenData.expiresAt.toISOString()}, 현재시간: ${now.toISOString()}`);
+            }
+            return isExpired;
+        }
+        
+        // expiresAt이 없는 경우 기존 방식 사용 (fallback)
         const timeSinceLastUpdate = now - tokenData.lastUpdated;
-        return timeSinceLastUpdate >= this.tokenExpiryTime;
+        const isExpiredByTime = timeSinceLastUpdate >= this.tokenExpiryTime;
+        if (isExpiredByTime) {
+            console.log(`토큰이 시간 기준으로 만료되었습니다. 마지막 업데이트: ${tokenData.lastUpdated.toISOString()}`);
+        }
+        return isExpiredByTime;
+    }
+
+    /**
+     * 토큰 만료시간 문자열을 Date 객체로 변환
+     * @param {string} expiryString - "2025-06-15 21:42:39" 형식의 문자열
+     * @returns {Date} - Date 객체
+     */
+    parseTokenExpiry(expiryString) {
+        try {
+            // "2025-06-15 21:42:39" 형식을 ISO 형식으로 변환
+            const isoString = expiryString.replace(' ', 'T') + '+09:00'; // 한국 시간대 추가
+            return new Date(isoString);
+        } catch (error) {
+            console.warn('토큰 만료시간 파싱 실패:', expiryString, error.message);
+            return null;
+        }
     }
 
     async updateRestToken() {
@@ -46,7 +79,7 @@ class KoreaInvestmentTokenManager {
             console.log('REST API 토큰을 업데이트합니다...');
             
             const response = await axios.post(
-                'https://openapi.koreainvestment.com:9443/oauth2/tokenP',
+                `${process.env.KOREA_INV_APIDOMAIN}/oauth2/tokenP`,
                 {
                     grant_type: 'client_credentials',
                     appkey: process.env.KOREA_INV_APPKEY,
@@ -54,13 +87,30 @@ class KoreaInvestmentTokenManager {
                 }
             );
 
+            const responseData = response.data;
+            console.log('REST API 토큰 응답 데이터:', responseData);
+
+            // 토큰 만료시간 파싱
+            let expiresAt = null;
+            if (responseData.access_token_token_expired) {
+                expiresAt = this.parseTokenExpiry(responseData.access_token_token_expired);
+                console.log(`REST API 토큰 만료시간: ${expiresAt ? expiresAt.toISOString() : '파싱 실패'}`);
+            }
+
             // DB에 토큰 저장
+            const updateData = {
+                token: responseData.access_token,
+                lastUpdated: new Date()
+            };
+
+            // 만료시간이 파싱되었으면 추가
+            if (expiresAt) {
+                updateData.expiresAt = expiresAt;
+            }
+
             await Token.findOneAndUpdate(
                 { type: 'REST' },
-                {
-                    token: response.data.access_token,
-                    lastUpdated: new Date()
-                },
+                updateData,
                 { upsert: true }
             );
 
@@ -76,7 +126,7 @@ class KoreaInvestmentTokenManager {
             console.log('WebSocket 토큰을 업데이트합니다...');
             
             const response = await axios.post(
-                'https://openapi.koreainvestment.com:9443/oauth2/Approval',
+                `${process.env.KOREA_INV_APIDOMAIN}/oauth2/Approval`,
                 {
                     grant_type: 'client_credentials',
                     appkey: process.env.KOREA_INV_APPKEY,
@@ -84,11 +134,15 @@ class KoreaInvestmentTokenManager {
                 }
             );
 
-            // DB에 토큰 저장
+            const responseData = response.data;
+            console.log('WebSocket 토큰 응답 데이터:', responseData);
+
+            // WebSocket 토큰은 만료시간을 제공하지 않으므로 기존 방식 사용
+            // DB에 토큰 저장 (expiresAt 없이)
             await Token.findOneAndUpdate(
                 { type: 'WEBSOCKET' },
                 {
-                    token: response.data.approval_key,
+                    token: responseData.approval_key,
                     lastUpdated: new Date()
                 },
                 { upsert: true }
@@ -117,6 +171,9 @@ class KoreaInvestmentTokenManager {
                         await this.updateRestToken();
                     } else {
                         console.log('REST API 토큰이 유효합니다.');
+                        if (restToken.expiresAt) {
+                            console.log(`REST API 토큰 만료 예정: ${restToken.expiresAt.toISOString()}`);
+                        }
                     }
 
                     // WebSocket 토큰이 없거나 만료된 경우

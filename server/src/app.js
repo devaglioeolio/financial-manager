@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const assetRoutes = require('./routes/assets');
 const goalRoutes = require('./routes/goalRoutes');
 const assetSnapshotRoutes = require('./routes/assetSnapshots');
+const koreaInvRoutes = require('./routes/koreaInv');
 const { startExchangeRateScheduler } = require('./schedulers/exchangeRateScheduler');
 const { startDailySnapshotScheduler } = require('./schedulers/dailySnapshotScheduler');
 const tokenManager = require('./services/koreaInvestmentToken');
@@ -32,6 +33,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/goals', goalRoutes);
 app.use('/api/asset-snapshots', assetSnapshotRoutes);
+app.use('/api/korea-inv', koreaInvRoutes);
 
 // 기본 라우트 핸들러
 app.get('/', (req, res) => {

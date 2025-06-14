@@ -1,6 +1,6 @@
 const Asset = require('../models/Asset');
 const { getExchangeRatesWithChange, initializeExchangeRates } = require('../services/exchangeRateService');
-const { calculateStockReturns } = require('../services/stockPriceService');
+const { calculateForeignStockReturns } = require('./koreaInvController');
 
 // 자산 목록 조회
 exports.getAssets = async (req, res) => {
@@ -584,8 +584,8 @@ exports.getForeignStockReturns = async (req, res) => {
     // 사용자의 모든 자산 조회
     const assets = await Asset.find({ userId: req.user.id });
     
-    // 해외주식 실시간 수익률 계산
-    const stockReturns = await calculateStockReturns(assets);
+    // 해외주식 실시간 수익률 계산 (한국투자증권 API 사용)
+    const stockReturns = await calculateForeignStockReturns(assets, true);
     
     console.log(`해외주식 수익률 계산 완료: ${stockReturns.length}개 종목`);
     

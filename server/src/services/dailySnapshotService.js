@@ -3,7 +3,7 @@ const DailyAssetSnapshot = require('../models/DailyAssetSnapshot');
 const User = require('../models/User');
 const ExchangeRate = require('../models/ExchangeRate');
 const { getExchangeRatesWithChange } = require('./exchangeRateService');
-const { calculateStockReturns } = require('./stockPriceService');
+const { calculateForeignStockReturns } = require('../controllers/koreaInvController');
 
 /**
  * 특정 날짜의 환율 정보를 가져옵니다
@@ -82,7 +82,7 @@ const createDailySnapshot = async (userId, targetDate, useRealTimeData = false) 
     
     if (useRealTimeData) {
       try {
-        const foreignStockReturns = await calculateStockReturns(assets);
+        const foreignStockReturns = await calculateForeignStockReturns(assets, false); // 스냅샷용이므로 종가 데이터 사용
         foreignStockReturns.forEach(stock => {
           if (!stock.error) {
             stockPriceMap[stock.assetId.toString()] = stock;
