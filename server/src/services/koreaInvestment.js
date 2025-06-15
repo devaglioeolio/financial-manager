@@ -65,7 +65,6 @@ const getOverseasDailyChart = async (symbol, period = 'D', startDate = '', endDa
     };
 
     console.log(`한국투자증권 API 호출: ${symbol} 기간별 시세 조회`);
-    console.log('요청 파라미터:', params);
 
     const response = await axios.get(url, {
       headers,
@@ -116,7 +115,7 @@ const getOverseasDailyChart = async (symbol, period = 'D', startDate = '', endDa
     };
     
     console.log(`=== ${symbol} 최종 리턴 데이터 ===`);
-    console.log('result:', JSON.stringify(result, null, 2));
+    console.log('result:', JSON.stringify(result.basicData, null, 2));
     
     return result;
 

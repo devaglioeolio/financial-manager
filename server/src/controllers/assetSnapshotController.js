@@ -10,24 +10,25 @@ exports.getDailyAssetChanges = async (req, res) => {
     const { days = 7 } = req.query;
     const userId = req.user.id;
 
-    // 요청된 기간의 끝 날짜 (오늘)
+    // 요청된 기간의 끝 날짜 (어제까지만)
     const endDate = new Date();
+    endDate.setDate(endDate.getDate() - 1); // 어제로 설정
     const startDate = new Date();
-    startDate.setDate(endDate.getDate() - parseInt(days));
+    startDate.setDate(endDate.getDate() - parseInt(days) + 1);
 
-    // 과거 데이터는 저장된 스냅샷에서 가져오기
+    // 저장된 스냅샷에서 데이터 가져오기 (어제까지만)
     const startDateStr = startDate.toISOString().split('T')[0];
-    const yesterdayStr = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
 
     const savedSnapshots = await DailyAssetSnapshot.getDateRange(
       userId, 
       startDateStr, 
-      yesterdayStr
+      endDateStr
     );
 
     const result = [];
 
-    // 저장된 스냅샷 데이터 추가
+    // 저장된 스냅샷 데이터만 추가
     savedSnapshots.forEach(snapshot => {
       result.push({
         date: snapshot.date,
@@ -40,19 +41,6 @@ exports.getDailyAssetChanges = async (req, res) => {
       });
     });
 
-    // 오늘 데이터는 실시간 계산
-    const todayStr = endDate.toISOString().split('T')[0];
-    const todayAssets = await calculateTodayAssets(userId);
-    
-    if (todayAssets) {
-      result.push({
-        date: todayStr,
-        totalAmount: todayAssets.totalAmount,
-        categories: todayAssets.categories,
-        isRealTime: true
-      });
-    }
-
     // 날짜순 정렬
     result.sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -61,9 +49,10 @@ exports.getDailyAssetChanges = async (req, res) => {
       data: result,
       period: {
         start: startDateStr,
-        end: todayStr,
+        end: endDateStr,
         days: parseInt(days)
-      }
+      },
+      note: "오늘 데이터는 클라이언트에서 실시간 데이터를 활용하여 계산됩니다."
     });
 
   } catch (error) {
@@ -75,39 +64,6 @@ exports.getDailyAssetChanges = async (req, res) => {
     });
   }
 };
-
-// 오늘 자산 계산 (실시간)
-const calculateTodayAssets = async (userId) => {
-  try {
-    // createDailySnapshot 함수를 재사용하되 실시간 데이터로 조회
-    const today = new Date().toISOString().split('T')[0];
-    const snapshot = await createDailySnapshot(userId, today, true);
-    
-    if (!snapshot) {
-      return null;
-    }
-
-    // 기존 형식으로 변환
-    const categories = snapshot.categories.map(cat => ({
-      category: cat.mainCategory,
-      categoryName: cat.categoryName,
-      amount: cat.totalAmountKRW
-    }));
-
-    return {
-      totalAmount: snapshot.totalAssetKRW,
-      categories: categories
-    };
-
-
-
-  } catch (error) {
-    console.error('오늘 자산 계산 실패:', error);
-    return null;
-  }
-};
-
-
 
 // 특정 날짜 스냅샷 수동 생성
 exports.createSnapshot = async (req, res) => {
