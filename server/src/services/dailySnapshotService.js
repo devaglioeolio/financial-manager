@@ -82,7 +82,7 @@ const createDailySnapshot = async (userId, targetDate, useRealTimeData = false) 
     
     if (useRealTimeData) {
       try {
-        const foreignStockReturns = await calculateForeignStockReturns(assets, false); // 스냅샷용이므로 종가 데이터 사용
+        const foreignStockReturns = await calculateForeignStockReturns(assets, 'snapshot'); // 스냅샷용이므로 종가 데이터 사용
         foreignStockReturns.forEach(stock => {
           if (!stock.error) {
             stockPriceMap[stock.assetId.toString()] = stock;

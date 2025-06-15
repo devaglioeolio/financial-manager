@@ -45,12 +45,9 @@ const fetchExchangeRatesFromAPI = async (searchDate) => {
       throw new Error('KOREAEXIM_APIKEY가 환경변수에 설정되지 않았습니다.');
     }
 
-    console.log(`API Key 길이: ${apiKey.length}`);
-    console.log(`검색 날짜: ${searchDate}`);
+    console.log(`환율검색 날짜: ${searchDate}`);
     
     const url = `https://www.koreaexim.go.kr/site/program/financial/exchangeJSON?authkey=${apiKey}&searchdate=${searchDate}&data=AP01`;
-    
-    console.log(`환율 API 호출: ${url.replace(apiKey, '***API_KEY***')}`); // API 키 숨김
     
     // 원복: 기본 axios.get만 사용
     const response = await axios.get(url);

@@ -233,6 +233,9 @@ exports.getBatchOverseasPrice = async (req, res) => {
  */
 const calculateForeignStockReturns = async (assets, mode = 'snapshot') => {
   try {
+    console.log(`=== calculateForeignStockReturns ===`);
+    console.log(`mode === 'realtime': ${mode === 'realtime'}`);
+    
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const yesterday = new Date(today.getTime() - (1 * 24 * 60 * 60 * 1000));
@@ -261,7 +264,7 @@ const calculateForeignStockReturns = async (assets, mode = 'snapshot') => {
 
     for (const asset of foreignStocks) {
       const ticker = asset.details?.get ? asset.details.get('ticker') : asset.details?.ticker;
-      const exchangeCode = asset.details?.get ? asset.details.get('exchangeCode') : asset.details?.exchangeCode;
+      const market = asset.details?.get ? asset.details.get('market') : asset.details?.market;
 
       try {
         let stockData;
@@ -269,7 +272,8 @@ const calculateForeignStockReturns = async (assets, mode = 'snapshot') => {
         
         if (mode === 'realtime') {
           // 실시간 모드: 현재가 조회
-          stockData = await koreaInvestmentService.getOverseasCurrentPrice(ticker, exchangeCode || 'NAS');
+          console.log(`${ticker} 현재가 조회 중...`);
+          stockData = await koreaInvestmentService.getOverseasCurrentPrice(ticker, market || 'NAS');
           currentPrice = stockData.price;
         } else {
           // 스냅샷 모드: 일일 차트 데이터로 어제 종가 가져오기

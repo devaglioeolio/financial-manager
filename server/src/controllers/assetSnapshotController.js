@@ -2,7 +2,6 @@ const DailyAssetSnapshot = require('../models/DailyAssetSnapshot');
 const { createDailySnapshot } = require('../services/dailySnapshotService');
 const Asset = require('../models/Asset');
 const { getExchangeRatesWithChange } = require('../services/exchangeRateService');
-const { calculateStockReturns } = require('../services/stockPriceService');
 
 // 일별 자산 변화 조회
 exports.getDailyAssetChanges = async (req, res) => {
