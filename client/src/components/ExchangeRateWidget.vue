@@ -15,14 +15,14 @@
       <div class="widget-header">
         <h3>환율 정보</h3>
         <div class="header-actions">
-          <button class="refresh-btn" @click.stop="fetchExchangeRates" :disabled="loading">
-            <span :class="{ 'rotating': loading }">↻</span>
+          <button class="refresh-btn" @click.stop="fetchExchangeRates" :disabled="effectiveLoading">
+            <span :class="{ 'rotating': effectiveLoading }">↻</span>
           </button>
           <button class="close-btn" @click="toggleExpanded">✕</button>
         </div>
       </div>
       
-      <div v-if="loading" class="loading-state">
+      <div v-if="effectiveLoading" class="loading-state">
         <div class="loading-spinner"></div>
         <p>환율 정보를 가져오는 중...</p>
       </div>
@@ -35,7 +35,7 @@
       
       <div v-else class="exchange-list">
         <div 
-          v-for="rate in exchangeRates" 
+          v-for="rate in effectiveExchangeRates" 
           :key="rate.currency"
           class="exchange-item"
           :class="{ 'positive': rate.change > 0, 'negative': rate.change < 0 }"
@@ -67,7 +67,7 @@
         </div>
       </div>
       
-      <div v-if="lastUpdate && !loading" class="update-info">
+      <div v-if="lastUpdate && !effectiveLoading" class="update-info">
         <span class="update-time">
           마지막 업데이트: {{ formatUpdateTime(lastUpdate) }}
         </span>
@@ -77,19 +77,40 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import axios from 'axios'
 
-const exchangeRates = ref([])
-const loading = ref(false)
+// Props 정의
+const props = defineProps({
+  exchangeRates: {
+    type: Array,
+    default: () => []
+  },
+  loading: {
+    type: Boolean,
+    default: false
+  }
+})
+
+const localExchangeRates = ref([])
+const localLoading = ref(false)
 const error = ref(false)
 const lastUpdate = ref(null)
 const isExpanded = ref(false)
 const currentIndex = ref(0)
 let rotationInterval = null
 
+// props가 있으면 props 사용, 없으면 로컬 데이터 사용
+const effectiveExchangeRates = computed(() => {
+  return props.exchangeRates.length > 0 ? props.exchangeRates : localExchangeRates.value
+})
+
+const effectiveLoading = computed(() => {
+  return props.loading || localLoading.value
+})
+
 const currentRate = computed(() => {
-  if (exchangeRates.value.length === 0) {
+  if (effectiveExchangeRates.value.length === 0) {
     return {
       currency: 'USD',
       rate: 0,
@@ -97,7 +118,7 @@ const currentRate = computed(() => {
       changePercent: 0
     }
   }
-  return exchangeRates.value[currentIndex.value]
+  return effectiveExchangeRates.value[currentIndex.value]
 })
 
 const formatNumber = (number) => {
@@ -134,9 +155,9 @@ const toggleExpanded = () => {
 }
 
 const startRotation = () => {
-  if (exchangeRates.value.length > 1) {
+  if (effectiveExchangeRates.value.length > 1) {
     rotationInterval = setInterval(() => {
-      currentIndex.value = (currentIndex.value + 1) % exchangeRates.value.length
+      currentIndex.value = (currentIndex.value + 1) % effectiveExchangeRates.value.length
     }, 5000)
   }
 }
@@ -149,13 +170,13 @@ const stopRotation = () => {
 }
 
 const fetchExchangeRates = async () => {
-  loading.value = true
+  localLoading.value = true
   error.value = false
   
   try {
     const response = await axios.get('/api/assets/exchange-rates')
     if (response.data.success) {
-      exchangeRates.value = response.data.data
+      localExchangeRates.value = response.data.data
       lastUpdate.value = response.data.lastUpdate
       if (!isExpanded.value) {
         startRotation()
@@ -167,12 +188,23 @@ const fetchExchangeRates = async () => {
     console.error('환율 정보 조회 실패:', err)
     error.value = true
   } finally {
-    loading.value = false
+    localLoading.value = false
   }
 }
 
+// Props 데이터 변경 감지
+watch(() => props.exchangeRates, (newRates) => {
+  if (newRates.length > 0 && !isExpanded.value) {
+    stopRotation()
+    startRotation()
+  }
+}, { immediate: true })
+
 onMounted(() => {
-  fetchExchangeRates()
+  // 부모에서 로딩 중이면 기다리고, props가 없으면서 로딩도 아닐 때만 독립적으로 호출
+  if (props.exchangeRates.length === 0 && !props.loading) {
+    fetchExchangeRates()
+  }
 })
 
 onUnmounted(() => {

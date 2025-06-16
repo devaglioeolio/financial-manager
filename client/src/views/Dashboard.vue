@@ -42,7 +42,7 @@
               </button>
             </div>
             <div class="header-widget">
-              <ExchangeRateWidget />
+              <ExchangeRateWidget :exchangeRates="exchangeRatesArray" :loading="realTimeDataLoading" />
             </div>
           </div>
         </div>
@@ -202,8 +202,8 @@
     <!-- 위젯 섹션 -->
     <div class="widgets-section">
       <div class="widgets-grid">
-        <ExchangeRateWidget />
-        <ForeignStockWidget />
+        <ForeignStockWidget :stockData="stockDataArray" :loading="realTimeDataLoading" />
+        <KISRealTimeWidget />
       </div>
     </div>
 
@@ -551,6 +551,7 @@ import { Pie as PieChart, Line as LineChart } from 'vue-chartjs'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement } from 'chart.js'
 import axios from 'axios'
 import ExchangeRateWidget from '../components/ExchangeRateWidget.vue'
+import KISRealTimeWidget from '../components/KISRealTimeWidget.vue'
 import ForeignStockWidget from '../components/ForeignStockWidget.vue'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement)
@@ -560,6 +561,8 @@ const categories = ref([])
 const hasRealTimeData = ref(false)
 const realTimeStockData = ref({})
 const realTimeExchangeRates = ref({})
+const realTimeExchangeRatesForWidget = ref({})
+const realTimeDataLoading = ref(true)
 const activeTab = ref('monthly')
 const selectedDays = ref(7)
 const activeDetailTab = ref('assets')
@@ -624,6 +627,21 @@ const dayOptions = [
   { value: 14, label: '14일' },
   { value: 30, label: '30일' }
 ]
+
+// 위젯용 데이터 배열 변환
+const exchangeRatesArray = computed(() => {
+  if (!realTimeExchangeRatesForWidget.value || typeof realTimeExchangeRatesForWidget.value !== 'object') {
+    return []
+  }
+  return Object.values(realTimeExchangeRatesForWidget.value).filter(rate => rate && rate.currency)
+})
+
+const stockDataArray = computed(() => {
+  if (!realTimeStockData.value || typeof realTimeStockData.value !== 'object') {
+    return []
+  }
+  return Object.values(realTimeStockData.value).filter(stock => stock && (stock.assetId || stock.name))
+})
 
 // 실시간 데이터가 적용된 파이 차트 데이터
 const calculatedPieChartData = computed(() => {
@@ -849,6 +867,7 @@ const fetchAssets = async () => {
 
 // 실시간 데이터 가져오기
 const fetchRealTimeData = async () => {
+  realTimeDataLoading.value = true
   try {
     // 환율과 해외주식 데이터를 병렬로 가져오기
     const [exchangeRatesResponse, stockReturnsResponse] = await Promise.all([
@@ -867,6 +886,7 @@ const fetchRealTimeData = async () => {
       const exchangeRateMap = {}
       exchangeRatesResponse.data.data.forEach(rate => {
         exchangeRateMap[rate.currency] = rate.rate
+        realTimeExchangeRatesForWidget.value[rate.currency] = rate
       })
       realTimeExchangeRates.value = exchangeRateMap
     }
@@ -888,6 +908,8 @@ const fetchRealTimeData = async () => {
   } catch (error) {
     console.error('실시간 데이터 조회 실패:', error)
     hasRealTimeData.value = false
+  } finally {
+    realTimeDataLoading.value = false
   }
 }
 
@@ -917,7 +939,7 @@ const fetchDailyAssets = async () => {
     const response = await axios.get(`/api/asset-snapshots/daily-changes?days=${selectedDays.value}`)
     const { data: dailyData } = response.data
     
-    // 날짜 표시 형식 변환
+    // 서버에서 받은 과거 데이터
     const formattedData = dailyData.map(item => {
       const date = new Date(item.date);
       const month = date.getMonth() + 1;
@@ -930,6 +952,24 @@ const fetchDailyAssets = async () => {
         dateDisplay: `${month}/${day}(${weekday})`
       };
     });
+
+    // 오늘 데이터를 클라이언트에서 계산해서 추가
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    const month = today.getMonth() + 1;
+    const day = today.getDate();
+    const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+    const weekday = weekdays[today.getDay()];
+    
+    const todayData = {
+      date: todayStr,
+      totalAmount: calculatedTotalAmount.value, // 실시간 데이터가 반영된 총 자산
+      dateDisplay: `${month}/${day}(${weekday})`,
+      isRealTime: true
+    };
+    
+    // 오늘 데이터를 배열에 추가
+    formattedData.push(todayData);
     
     dailyChartData.value = {
       labels: formattedData.map(data => data.dateDisplay),
@@ -941,9 +981,9 @@ const fetchDailyAssets = async () => {
         tension: 0.4,
         fill: true
       }]
-    }
+    };
   } catch (error) {
-    console.error('일별 자산 데이터 조회 실패:', error)
+    console.error('일별 자산 데이터 조회 실패:', error);
   }
 }
 
