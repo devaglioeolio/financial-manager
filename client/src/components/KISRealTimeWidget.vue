@@ -2,13 +2,15 @@
   <div class="kis-realtime-widget" :class="{ expanded: isExpanded }">
     <!-- 컴팩트 모드 -->
     <div class="widget-compact" @click="toggleExpanded" v-if="!isExpanded">
-      <div class="compact-stock">
-        <span class="stock-symbol">{{ stockData.symbol || 'NVDA' }}</span>
-        <span class="compact-price">${{ formatNumber(stockData.currentPrice) }}</span>
-      </div>
-      <div class="compact-change" :class="{ 'positive': stockData.changePercent > 0, 'negative': stockData.changePercent < 0 }">
-        <span class="change-arrow">{{ stockData.changePercent > 0 ? '▲' : stockData.changePercent < 0 ? '▼' : '-' }}</span>
-        <span class="change-text">{{ stockData.changePercent > 0 ? '+' : '' }}{{ stockData.changePercent.toFixed(2) }}%</span>
+      <div class="compact-stocks">
+        <div class="compact-stock" v-for="stock in stockDataList" :key="stock.symbol">
+          <span class="stock-symbol">{{ stock.symbol }}</span>
+          <span class="compact-price">${{ formatNumber(stock.currentPrice) }}</span>
+          <div class="compact-change" :class="{ 'positive': stock.changePercent > 0, 'negative': stock.changePercent < 0 }">
+            <span class="change-arrow">{{ stock.changePercent > 0 ? '▲' : stock.changePercent < 0 ? '▼' : '-' }}</span>
+            <span class="change-text">{{ stock.changePercent > 0 ? '+' : '' }}{{ stock.changePercent.toFixed(2) }}%</span>
+          </div>
+        </div>
       </div>
     </div>
     
@@ -40,43 +42,45 @@
         <button class="retry-btn" @click="connectWebSocket">다시 시도</button>
       </div>
       
-      <div v-else class="stock-details">
-        <div class="stock-header">
-          <div class="stock-name">
-            <h4>{{ stockData.name || 'NVIDIA Corp' }}</h4>
-            <span class="stock-symbol">{{ stockData.symbol || 'NVDA' }}</span>
-          </div>
-        </div>
-        
-        <div class="price-grid">
-          <div class="price-item current-price">
-            <span class="label">현재가</span>
-            <span class="value main-price">${{ formatNumber(stockData.currentPrice) }}</span>
-            <div class="price-change" :class="{ 'positive': stockData.changePercent > 0, 'negative': stockData.changePercent < 0 }">
-              <span class="change-amount">{{ stockData.changePercent > 0 ? '+' : '' }}${{ formatNumber(Math.abs(stockData.change)) }}</span>
-              <span class="change-percent">({{ stockData.changePercent > 0 ? '+' : '' }}{{ stockData.changePercent.toFixed(2) }}%)</span>
+      <div v-else class="stocks-container">
+        <div class="stock-details" v-for="stock in stockDataList" :key="stock.symbol">
+          <div class="stock-header">
+            <div class="stock-name">
+              <h4>{{ stock.name }}</h4>
+              <span class="stock-symbol">{{ stock.symbol }}</span>
             </div>
           </div>
           
-          <div class="price-item">
-            <span class="label">고가</span>
-            <span class="value">${{ formatNumber(stockData.highPrice) }}</span>
+          <div class="price-grid">
+            <div class="price-item current-price">
+              <span class="label">현재가</span>
+              <span class="value main-price">${{ formatNumber(stock.currentPrice) }}</span>
+              <div class="price-change" :class="{ 'positive': stock.changePercent > 0, 'negative': stock.changePercent < 0 }">
+                <span class="change-amount">{{ stock.changePercent > 0 ? '+' : '' }}${{ formatNumber(Math.abs(stock.change)) }}</span>
+                <span class="change-percent">({{ stock.changePercent > 0 ? '+' : '' }}{{ stock.changePercent.toFixed(2) }}%)</span>
+              </div>
+            </div>
+            
+            <div class="price-item">
+              <span class="label">고가</span>
+              <span class="value">${{ formatNumber(stock.highPrice) }}</span>
+            </div>
+            
+            <div class="price-item">
+              <span class="label">저가</span>
+              <span class="value">${{ formatNumber(stock.lowPrice) }}</span>
+            </div>
+            
+            <div class="price-item">
+              <span class="label">전일종가</span>
+              <span class="value">${{ formatNumber(stock.prevClose) }}</span>
+            </div>
           </div>
           
-          <div class="price-item">
-            <span class="label">저가</span>
-            <span class="value">${{ formatNumber(stockData.lowPrice) }}</span>
+          <div class="realtime-indicator">
+            <span class="pulse-dot"></span>
+            <span class="realtime-text">실시간 지연체결가</span>
           </div>
-          
-          <div class="price-item">
-            <span class="label">전일종가</span>
-            <span class="value">${{ formatNumber(stockData.prevClose) }}</span>
-          </div>
-        </div>
-        
-        <div class="realtime-indicator">
-          <span class="pulse-dot"></span>
-          <span class="realtime-text">실시간 지연체결가</span>
         </div>
       </div>
       
@@ -102,16 +106,18 @@ const error = ref(null)
 const lastUpdate = ref(null)
 const websocket = ref(null)
 
-const stockData = ref({
-  symbol: 'NVDA',
-  name: 'NVIDIA Corp',
-  currentPrice: 0,
-  change: 0,
-  changePercent: 0,
-  highPrice: 0,
-  lowPrice: 0,
-  prevClose: 0
-})
+// 구독할 종목 리스트
+const stockSymbols = [
+  { key: 'DNASNVDA', symbol: 'NVDA', name: 'NVIDIA Corp' },
+  { key: 'DNASCEG', symbol: 'CEG', name: 'Constellation Energy Corp' },
+  { key: 'DNASGOOGL', symbol: 'GOOGL', name: 'Alphabet Inc' },
+  { key: 'DNYSJPM', symbol: 'JPM', name: 'JPMorgan Chase & Co' },
+  { key: 'DAMSGLD', symbol: 'GLD', name: 'Gold' },
+  { key: 'DAMSSGOV', symbol: 'SGOV', name: 'SGOV' }
+]
+
+// 여러 종목 데이터를 저장할 배열
+const stockDataList = ref([])
 
 // WebSocket 연결 설정
 const WEBSOCKET_URL = 'ws://ops.koreainvestment.com:21000'
@@ -127,7 +133,15 @@ const getInitialApprovalKey = () => {
 
 const approvalKey = ref(getInitialApprovalKey())
 
+// 종목 키로 종목 정보 찾기
+const findStockByKey = (key) => {
+  return stockSymbols.find(stock => stock.key === key)
+}
 
+// 심볼로 종목 데이터 찾기
+const findStockDataBySymbol = (symbol) => {
+  return stockDataList.value.find(stock => stock.symbol === symbol)
+}
 
 const formatNumber = (number) => {
   if (number === null || number === undefined || isNaN(number)) {
@@ -163,8 +177,6 @@ const toggleExpanded = () => {
   }
 }
 
-
-
 const connectWebSocket = () => {
   if (!approvalKey.value) {
     error.value = 'Approval Key가 설정되지 않았습니다. 소스코드에서 API 키를 설정해주세요.'
@@ -182,23 +194,26 @@ const connectWebSocket = () => {
       isConnected.value = true
       isLoading.value = false
       
-      // 구독 메시지 전송
-      const subscribeMessage = {
-        header: {
-          approval_key: approvalKey.value,
-          custtype: "P",
-          tr_type: "1",
-          "content-type": "utf-8"
-        },
-        body: {
-          input: {
-            tr_id: "HDFSCNT0",
-            tr_key: "DNASNVDA"  // NVIDIA 종목 코드
+      // 모든 종목에 대해 구독 메시지 전송
+      stockSymbols.forEach(stock => {
+        const subscribeMessage = {
+          header: {
+            approval_key: approvalKey.value,
+            custtype: "P",
+            tr_type: "1",
+            "content-type": "utf-8"
+          },
+          body: {
+            input: {
+              tr_id: "HDFSCNT0",
+              tr_key: stock.key
+            }
           }
         }
-      }
-      
-      websocket.value.send(JSON.stringify(subscribeMessage))
+        
+        console.log(`${stock.symbol} 종목 구독 메시지 전송:`, subscribeMessage)
+        websocket.value.send(JSON.stringify(subscribeMessage))
+      })
     }
     
     websocket.value.onmessage = (event) => {
@@ -248,6 +263,10 @@ const parseStockData = (data) => {
       // "실시간종목코드|종목코드|수수점자리수|현지영업일자|현지일자|현지시간|한국일자|한국시간|시가|고가|저가|현재가|대비구분|전일대비|등락율|매수호가|매도호가|매수잔량|매도잔량|체결량|거래량|거래대금|매도체결량|매수체결량|체결강도|시장구분"
       
       if (values.length >= 15) {
+        // 첫 번째 필드에서 종목 키 추출 (파이프로 구분된 마지막 부분)
+        const firstField = values[0] || ''
+        const stockKey = firstField.includes('|') ? firstField.split('|').pop() : firstField
+        
         const openPrice = parseFloat(values[8]) || 0    // 시가 (인덱스 8)
         const highPrice = parseFloat(values[9]) || 0    // 고가 (인덱스 9)
         const lowPrice = parseFloat(values[10]) || 0    // 저가 (인덱스 10)
@@ -255,6 +274,13 @@ const parseStockData = (data) => {
         const changeSign = values[12] || '0'            // 대비구분 (인덱스 12)
         const change = parseFloat(values[13]) || 0      // 전일대비 (인덱스 13)
         const changePercent = parseFloat(values[14]) || 0 // 등락율 (인덱스 14)
+        
+        // 종목 키로 종목 정보 찾기
+        const stockInfo = findStockByKey(stockKey)
+        if (!stockInfo) {
+          console.warn('알 수 없는 종목 키:', stockKey, '(원본 데이터:', firstField, ')')
+          return
+        }
         
         // 전일종가 계산 (현재가 - 등락)
         const prevClose = currentPrice - change
@@ -271,14 +297,32 @@ const parseStockData = (data) => {
           adjustedChangePercent = Math.abs(changePercent)
         }
         
-        stockData.value.currentPrice = currentPrice
-        stockData.value.change = adjustedChange
-        stockData.value.changePercent = adjustedChangePercent
-        stockData.value.highPrice = highPrice
-        stockData.value.lowPrice = lowPrice
-        stockData.value.prevClose = prevClose
+        // 기존 종목 데이터 찾기 또는 새로 생성
+        let existingStock = findStockDataBySymbol(stockInfo.symbol)
         
-        console.log('파싱된 주식 데이터:', {
+        if (existingStock) {
+          // 기존 데이터 업데이트
+          existingStock.currentPrice = currentPrice
+          existingStock.change = adjustedChange
+          existingStock.changePercent = adjustedChangePercent
+          existingStock.highPrice = highPrice
+          existingStock.lowPrice = lowPrice
+          existingStock.prevClose = prevClose
+        } else {
+          // 새 종목 데이터 추가
+          stockDataList.value.push({
+            symbol: stockInfo.symbol,
+            name: stockInfo.name,
+            currentPrice: currentPrice,
+            change: adjustedChange,
+            changePercent: adjustedChangePercent,
+            highPrice: highPrice,
+            lowPrice: lowPrice,
+            prevClose: prevClose
+          })
+        }
+        
+        console.log(`${stockInfo.symbol} 파싱된 주식 데이터:`, {
           currentPrice,
           change: adjustedChange,
           changePercent: adjustedChangePercent,
@@ -315,16 +359,48 @@ const disconnectWebSocket = () => {
 
 onMounted(() => {
   // 초기 데이터 설정 (WebSocket 연결 전까지 표시할 데이터)
-  stockData.value = {
-    symbol: 'NVDA',
-    name: 'NVIDIA Corp',
-    currentPrice: 875.28,
-    change: 12.45,
-    changePercent: 1.44,
-    highPrice: 880.50,
-    lowPrice: 860.25,
-    prevClose: 862.83
-  }
+  stockDataList.value = [
+    {
+      symbol: 'NVDA',
+      name: 'NVIDIA Corp',
+      currentPrice: 875.28,
+      change: 12.45,
+      changePercent: 1.44,
+      highPrice: 880.50,
+      lowPrice: 860.25,
+      prevClose: 862.83
+    },
+    {
+      symbol: 'CEG',
+      name: 'Constellation Energy Corp',
+      currentPrice: 245.67,
+      change: -3.21,
+      changePercent: -1.29,
+      highPrice: 250.45,
+      lowPrice: 242.10,
+      prevClose: 248.88
+    },
+    {
+      symbol: 'GOOGL',
+      name: 'Alphabet Inc',
+      currentPrice: 178.24,
+      change: 2.15,
+      changePercent: 1.22,
+      highPrice: 179.88,
+      lowPrice: 175.67,
+      prevClose: 176.09
+    },
+    {
+      symbol: 'JPM',
+      name: 'JPMorgan Chase & Co',
+      currentPrice: 234.56,
+      change: 4.32,
+      changePercent: 1.88,
+      highPrice: 236.78,
+      lowPrice: 230.45,
+      prevClose: 230.24
+    }
+  ]
 })
 
 onUnmounted(() => {
@@ -355,16 +431,13 @@ onUnmounted(() => {
 }
 
 .kis-realtime-widget.expanded {
-  min-height: 400px;
+  min-height: 600px;
 }
 
 /* 컴팩트 모드 */
 .widget-compact {
   padding: 16px 20px;
   cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   transition: transform 0.2s ease;
 }
 
@@ -372,41 +445,50 @@ onUnmounted(() => {
   transform: translateY(-2px);
 }
 
+.compact-stocks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
 .compact-stock {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 4px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
 }
 
 .stock-symbol {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   opacity: 0.8;
 }
 
 .compact-price {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .compact-change {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  font-size: 12px;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
 }
 
 .compact-change.positive {
-  color: #4ade80;
+  color: #ef4444;
 }
 
 .compact-change.negative {
-  color: #f87171;
+  color: #3b82f6;
 }
 
 .change-arrow {
-  font-size: 10px;
+  font-size: 8px;
 }
 
 /* 확장 모드 */
@@ -522,13 +604,43 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.3);
 }
 
+/* 다중 종목 컨테이너 */
+.stocks-container {
+  max-height: 500px;
+  overflow-y: auto;
+  padding: 0 4px;
+}
+
+.stocks-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.stocks-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.stocks-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.stocks-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
 /* 주식 데이터 */
 .stock-details {
-  padding: 20px 24px;
+  padding: 20px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stock-details:last-child {
+  border-bottom: none;
 }
 
 .stock-header {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .stock-name h4 {
@@ -546,8 +658,8 @@ onUnmounted(() => {
 .price-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .price-item {
@@ -558,59 +670,58 @@ onUnmounted(() => {
 
 .price-item.current-price {
   grid-column: 1 / -1;
-  padding: 16px;
+  padding: 12px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: 8px;
   text-align: center;
 }
 
 .price-item .label {
-  font-size: 12px;
+  font-size: 11px;
   opacity: 0.7;
   font-weight: 500;
 }
 
 .price-item .value {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .main-price {
-  font-size: 24px !important;
+  font-size: 20px !important;
   font-weight: 700 !important;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .price-change {
   display: flex;
   justify-content: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 6px;
+  font-size: 12px;
 }
 
 .price-change.positive {
-  color: #4ade80;
+  color: #ef4444;
 }
 
 .price-change.negative {
-  color: #f87171;
+  color: #3b82f6;
 }
 
 .realtime-indicator {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 8px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  font-size: 12px;
-  margin-bottom: 16px;
+  border-radius: 6px;
+  font-size: 11px;
 }
 
 .pulse-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   background: #4ade80;
   border-radius: 50%;
   animation: pulse 1.5s infinite;
