@@ -15,11 +15,25 @@
       <div class="widget-header">
         <h3>환율 정보</h3>
         <div class="header-actions">
-          <button class="refresh-btn" @click.stop="fetchExchangeRates" :disabled="effectiveLoading">
-            <span :class="{ 'rotating': effectiveLoading }">↻</span>
+          <button 
+            class="refresh-btn" 
+            @click.stop="forceRefreshExchangeRates" 
+            :disabled="effectiveLoading"
+            title="수출입은행 API에서 최신 환율 가져오기"
+          >
+            <span :class="{ 'rotating': effectiveLoading }">🔄</span>
           </button>
           <button class="close-btn" @click="toggleExpanded">✕</button>
         </div>
+      </div>
+      
+      <!-- 메시지 표시 영역 -->
+      <div v-if="message" class="message-display" :class="messageType">
+        <span class="message-icon">
+          {{ messageType === 'success' ? '✅' : messageType === 'warning' ? '⚠️' : '❌' }}
+        </span>
+        <span class="message-text">{{ message }}</span>
+        <button class="message-close" @click="message = ''; messageType = ''">✕</button>
       </div>
       
       <div v-if="effectiveLoading" class="loading-state">
@@ -98,7 +112,10 @@ const error = ref(false)
 const lastUpdate = ref(null)
 const isExpanded = ref(false)
 const currentIndex = ref(0)
+const message = ref('')
+const messageType = ref('') // 'success', 'warning', 'error'
 let rotationInterval = null
+let messageTimeout = null
 
 // props가 있으면 props 사용, 없으면 로컬 데이터 사용
 const effectiveExchangeRates = computed(() => {
@@ -169,6 +186,24 @@ const stopRotation = () => {
   }
 }
 
+// 메시지 표시 함수
+const showMessage = (msg, type = 'info') => {
+  message.value = msg
+  messageType.value = type
+  
+  // 이전 타이머 클리어
+  if (messageTimeout) {
+    clearTimeout(messageTimeout)
+  }
+  
+  // 5초 후 메시지 자동 숨김
+  messageTimeout = setTimeout(() => {
+    message.value = ''
+    messageType.value = ''
+  }, 5000)
+}
+
+// 일반 환율 조회 (저장된 데이터)
 const fetchExchangeRates = async () => {
   localLoading.value = true
   error.value = false
@@ -192,6 +227,43 @@ const fetchExchangeRates = async () => {
   }
 }
 
+// 강제 새로고침 (수출입은행 API 직접 호출)
+const forceRefreshExchangeRates = async () => {
+  localLoading.value = true
+  error.value = false
+  
+  try {
+    console.log('환율 강제 새로고침 시작...')
+    const response = await axios.post('/api/assets/exchange-rates/refresh')
+    
+    if (response.data.data && response.data.data.length > 0) {
+      localExchangeRates.value = response.data.data
+      lastUpdate.value = response.data.lastUpdate
+      
+      if (response.data.success) {
+        // 성공: 새로운 환율 데이터
+        showMessage('환율 정보가 성공적으로 업데이트되었습니다! 🎉', 'success')
+      } else {
+        // 실패했지만 기존 데이터 표시
+        showMessage(`${response.data.message} ⚠️`, 'warning')
+      }
+      
+      if (!isExpanded.value) {
+        startRotation()
+      }
+    } else {
+      throw new Error(response.data.message || '환율 데이터를 가져올 수 없습니다')
+    }
+  } catch (err) {
+    console.error('환율 강제 새로고침 실패:', err)
+    const errorMsg = err.response?.data?.message || err.message
+    showMessage(`환율 새로고침 실패: ${errorMsg} ❌`, 'error')
+    error.value = true
+  } finally {
+    localLoading.value = false
+  }
+}
+
 // Props 데이터 변경 감지
 watch(() => props.exchangeRates, (newRates) => {
   if (newRates.length > 0 && !isExpanded.value) {
@@ -209,6 +281,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopRotation()
+  if (messageTimeout) {
+    clearTimeout(messageTimeout)
+  }
 })
 </script>
 
@@ -502,5 +577,75 @@ onUnmounted(() => {
   font-size: 0.7rem;
   color: #999;
   font-weight: 500;
+}
+
+/* 메시지 표시 스타일 */
+.message-display {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  position: relative;
+  border-left: 4px solid;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-display.success {
+  background: rgba(76, 175, 80, 0.1);
+  border-left-color: #4CAF50;
+  color: #2e7d32;
+}
+
+.message-display.warning {
+  background: rgba(255, 152, 0, 0.1);
+  border-left-color: #FF9800;
+  color: #ef6c00;
+}
+
+.message-display.error {
+  background: rgba(244, 67, 54, 0.1);
+  border-left-color: #f44336;
+  color: #c62828;
+}
+
+.message-icon {
+  margin-right: 0.5rem;
+  font-size: 1rem;
+}
+
+.message-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.message-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.2rem;
+  margin-left: 0.5rem;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+  opacity: 0.7;
+}
+
+.message-close:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.1);
 }
 </style> 

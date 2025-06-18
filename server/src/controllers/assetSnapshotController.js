@@ -1,5 +1,5 @@
 const DailyAssetSnapshot = require('../models/DailyAssetSnapshot');
-const { createDailySnapshot } = require('../services/dailySnapshotService');
+const { createDailySnapshot, createMissingSnapshotsForUser, createMissingSnapshotsForAllUsers } = require('../services/dailySnapshotService');
 const Asset = require('../models/Asset');
 const { getExchangeRatesWithChange } = require('../services/exchangeRateService');
 
@@ -139,6 +139,57 @@ exports.getSnapshots = async (req, res) => {
     res.status(500).json({
       success: false,
       message: '스냅샷 목록 조회에 실패했습니다.',
+      error: error.message
+    });
+  }
+};
+
+// 사용자의 누락된 스냅샷 백필
+exports.backfillMissingSnapshots = async (req, res) => {
+  try {
+    const { startDate, endDate, days = 7 } = req.body;
+    const userId = req.user.id;
+
+    console.log(`사용자 ${userId}의 누락된 스냅샷 백필 요청`);
+
+    const result = await createMissingSnapshotsForUser(userId, startDate, endDate || null);
+
+    res.json({
+      success: true,
+      message: '누락된 스냅샷 백필이 완료되었습니다.',
+      data: result
+    });
+
+  } catch (error) {
+    console.error('누락된 스냅샷 백필 실패:', error);
+    res.status(500).json({
+      success: false,
+      message: '누락된 스냅샷 백필에 실패했습니다.',
+      error: error.message
+    });
+  }
+};
+
+// 모든 사용자의 누락된 스냅샷 백필 (관리자용)
+exports.backfillAllUsers = async (req, res) => {
+  try {
+    const { days = 7 } = req.body;
+
+    console.log(`모든 사용자의 누락된 스냅샷 백필 요청 (${days}일)`);
+
+    const result = await createMissingSnapshotsForAllUsers(days);
+
+    res.json({
+      success: true,
+      message: '모든 사용자의 누락된 스냅샷 백필이 완료되었습니다.',
+      data: result
+    });
+
+  } catch (error) {
+    console.error('전체 사용자 누락된 스냅샷 백필 실패:', error);
+    res.status(500).json({
+      success: false,
+      message: '전체 사용자 누락된 스냅샷 백필에 실패했습니다.',
       error: error.message
     });
   }

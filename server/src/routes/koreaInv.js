@@ -37,6 +37,12 @@ router.post('/overseas/chart/batch', auth, koreaInvController.getBatchOverseasCh
 router.post('/overseas/price/batch', auth, koreaInvController.getBatchOverseasPrice);
 
 /**
+ * GET /api/korea-inv/websocket/token
+ * 웹소켓 인증키 조회
+ */
+router.get('/websocket/token', auth, koreaInvController.getWebsocketToken);
+
+/**
  * GET /api/korea-inv/health
  * API 상태 확인
  */

@@ -82,7 +82,8 @@ const createDailySnapshot = async (userId, targetDate, useRealTimeData = false) 
     
     if (useRealTimeData) {
       try {
-        const foreignStockReturns = await calculateForeignStockReturns(assets, 'snapshot'); // 스냅샷용이므로 종가 데이터 사용
+        // 스냅샷 모드에서 특정 날짜의 종가 데이터 사용
+        const foreignStockReturns = await calculateForeignStockReturns(assets, 'snapshot', targetDate);
         foreignStockReturns.forEach(stock => {
           if (!stock.error) {
             stockPriceMap[stock.assetId.toString()] = stock;
@@ -93,6 +94,7 @@ const createDailySnapshot = async (userId, targetDate, useRealTimeData = false) 
             });
           }
         });
+        console.log(`주식 가격 정보 조회 완료 (${targetDate}): ${stockPrices.length}개 종목`);
       } catch (error) {
         console.warn('주식 가격 정보 조회 실패, 기존 데이터 사용:', error.message);
       }
@@ -239,20 +241,154 @@ const createYesterdaySnapshotsForAllUsers = async () => {
     yesterday.setDate(yesterday.getDate() - 1);
     const targetDate = yesterday.toISOString().split('T')[0];
 
+    console.log(`어제(${targetDate}) 스냅샷 생성 시작 - 실제 종가/환율 데이터 사용`);
+
     const users = await User.find({});
     
     for (const user of users) {
       try {
-        // 과거 스냅샷이므로 실시간 데이터 사용하지 않음
-        await createDailySnapshot(user._id, targetDate, false);
+        // ✅ 어제 스냅샷이지만 실제 종가 데이터를 사용해야 정확함
+        // useRealTimeData = true로 변경하여 실제 주식 종가와 환율 반영
+        await createDailySnapshot(user._id, targetDate, true);
       } catch (error) {
         console.error(`Error creating snapshot for user ${user._id}:`, error);
       }
     }
 
-    console.log(`Completed daily snapshots for ${users.length} users on ${targetDate}`);
+    console.log(`Completed daily snapshots for ${users.length} users on ${targetDate} with real market data`);
   } catch (error) {
     console.error('Error in createYesterdaySnapshotsForAllUsers:', error);
+    throw error;
+  }
+};
+
+/**
+ * 특정 사용자의 누락된 스냅샷들을 찾고 생성합니다
+ */
+const createMissingSnapshotsForUser = async (userId, startDate = null, endDate = null) => {
+  try {
+    // 기본값: 최근 30일
+    if (!endDate) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      endDate = yesterday.toISOString().split('T')[0];
+    }
+    
+    if (!startDate) {
+      const thirtyDaysAgo = new Date(endDate);
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      startDate = thirtyDaysAgo.toISOString().split('T')[0];
+    }
+
+    console.log(`사용자 ${userId}의 누락된 스냅샷 체크 (${startDate} ~ ${endDate})`);
+
+    // 해당 기간의 기존 스냅샷 조회
+    const existingSnapshots = await DailyAssetSnapshot.find({
+      userId: userId,
+      date: { $gte: startDate, $lte: endDate }
+    }).select('date');
+
+    const existingDatesSet = new Set(existingSnapshots.map(s => s.date));
+
+    // 누락된 날짜들 찾기
+    const missingDates = [];
+    const currentDate = new Date(startDate);
+    const finalDate = new Date(endDate);
+
+    while (currentDate <= finalDate) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      if (!existingDatesSet.has(dateStr)) {
+        missingDates.push(dateStr);
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    if (missingDates.length === 0) {
+      console.log(`사용자 ${userId}: 누락된 스냅샷이 없습니다.`);
+      return { success: true, created: 0, skipped: 0, errors: 0 };
+    }
+
+    console.log(`사용자 ${userId}: ${missingDates.length}개의 누락된 날짜 발견:`, missingDates);
+
+    // 누락된 스냅샷들 생성
+    let created = 0, skipped = 0, errors = 0;
+
+    for (const date of missingDates) {
+      try {
+        // 주말(토, 일) 건너뛰기
+        const dateObj = new Date(date);
+        const dayOfWeek = dateObj.getDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+          console.log(`${date}: 주말이므로 건너뜀`);
+          skipped++;
+          continue;
+        }
+
+        await createDailySnapshot(userId, date, true);
+        created++;
+        console.log(`✅ ${date} 스냅샷 생성 완료`);
+        
+        // API 호출 부하를 줄이기 위해 약간의 딜레이
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+      } catch (error) {
+        console.error(`❌ ${date} 스냅샷 생성 실패:`, error.message);
+        errors++;
+      }
+    }
+
+    const result = { success: true, created, skipped, errors, total: missingDates.length };
+    console.log(`사용자 ${userId} 누락 스냅샷 생성 완료:`, result);
+    return result;
+
+  } catch (error) {
+    console.error(`사용자 ${userId} 누락 스냅샷 생성 실패:`, error);
+    throw error;
+  }
+};
+
+/**
+ * 모든 사용자의 누락된 스냅샷들을 생성합니다 (서버 시작 시 호출)
+ */
+const createMissingSnapshotsForAllUsers = async (days = 7) => {
+  try {
+    console.log(`=== 모든 사용자의 누락 스냅샷 백필 시작 (최근 ${days}일) ===`);
+    
+    const users = await User.find({});
+    const results = [];
+
+    for (const user of users) {
+      try {
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() - 1); // 어제까지
+        const startDate = new Date(endDate);
+        startDate.setDate(startDate.getDate() - days + 1);
+
+        const result = await createMissingSnapshotsForUser(
+          user._id, 
+          startDate.toISOString().split('T')[0],
+          endDate.toISOString().split('T')[0]
+        );
+        
+        results.push({ userId: user._id, ...result });
+      } catch (error) {
+        console.error(`사용자 ${user._id} 처리 실패:`, error);
+        results.push({ userId: user._id, success: false, error: error.message });
+      }
+    }
+
+    const summary = results.reduce((acc, r) => ({
+      totalUsers: acc.totalUsers + 1,
+      totalCreated: acc.totalCreated + (r.created || 0),
+      totalSkipped: acc.totalSkipped + (r.skipped || 0),
+      totalErrors: acc.totalErrors + (r.errors || 0)
+    }), { totalUsers: 0, totalCreated: 0, totalSkipped: 0, totalErrors: 0 });
+
+    console.log(`=== 누락 스냅샷 백필 완료 ===`, summary);
+    return { success: true, results, summary };
+
+  } catch (error) {
+    console.error('모든 사용자 누락 스냅샷 생성 실패:', error);
     throw error;
   }
 };
@@ -261,5 +397,7 @@ const createYesterdaySnapshotsForAllUsers = async () => {
 
 module.exports = {
   createDailySnapshot,
-  createYesterdaySnapshotsForAllUsers
+  createYesterdaySnapshotsForAllUsers,
+  createMissingSnapshotsForUser,
+  createMissingSnapshotsForAllUsers
 }; 

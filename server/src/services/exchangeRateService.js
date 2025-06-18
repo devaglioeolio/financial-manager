@@ -96,27 +96,41 @@ const saveExchangeRates = async (data, date) => {
         // deal_bas_r에서 쉼표 제거 후 숫자로 변환
         const dealBasR = parseFloat(item.deal_bas_r.replace(/,/g, ''));
         
-        const exchangeRate = new ExchangeRate({
-          date: date,
-          curUnit: curUnit,
-          dealBasR: dealBasR,
-          curNm: item.cur_nm
-        });
+        // 기존 데이터 확인
+        const existingRate = await ExchangeRate.findOne({ date: date, curUnit: curUnit });
+        
+        // 기존 데이터가 있으면 업데이트, 없으면 새로 생성 (upsert)
+        const result = await ExchangeRate.findOneAndUpdate(
+          { 
+            date: date, 
+            curUnit: curUnit 
+          },
+          {
+            dealBasR: dealBasR,
+            curNm: item.cur_nm,
+            date: date,
+            curUnit: curUnit
+          },
+          { 
+            upsert: true, // 없으면 새로 생성
+            new: true,    // 업데이트된 문서 반환
+            runValidators: true
+          }
+        );
 
-        await exchangeRate.save();
         savedRates.push({
           curUnit: curUnit,
           dealBasR: dealBasR,
           curNm: item.cur_nm
         });
         
-        console.log(`${date} ${curUnit}: ${dealBasR} 저장 완료`);
-      } catch (saveError) {
-        if (saveError.code === 11000) {
-          console.log(`${date} ${item.cur_unit}: 이미 존재하는 데이터입니다.`);
+        if (existingRate) {
+          console.log(`${date} ${curUnit}: ${existingRate.dealBasR} → ${dealBasR} 업데이트 완료`);
         } else {
-          console.error(`${date} ${item.cur_unit} 저장 실패:`, saveError.message);
+          console.log(`${date} ${curUnit}: ${dealBasR} 새로 저장 완료`);
         }
+      } catch (saveError) {
+        console.error(`${date} ${item.cur_unit} 저장/업데이트 실패:`, saveError.message);
       }
     }
 
@@ -340,11 +354,73 @@ const checkAndFetchTodayExchangeRates = async () => {
   }
 };
 
+/**
+ * 강제 환율 새로고침 (위젯에서 사용)
+ * API 호출 실패 시에도 기존 저장된 환율 반환
+ */
+const forceRefreshExchangeRates = async () => {
+  try {
+    console.log('환율 강제 새로고침 시작...');
+    
+    // 현재 시간 확인
+    const now = new Date();
+    const result = await fetchAndSaveExchangeRates(now);
+    
+    if (result.success) {
+      console.log('환율 강제 새로고침 성공:', result.message);
+      // 새로운 환율 데이터 반환
+      const newRates = await getExchangeRatesWithChange();
+      return {
+        success: true,
+        message: '환율 정보가 성공적으로 업데이트되었습니다.',
+        data: newRates,
+        lastUpdate: new Date().toISOString()
+      };
+    } else {
+      console.log('환율 API 호출 실패, 기존 저장된 환율 반환:', result.message);
+      // 기존 저장된 환율 반환
+      const existingRates = await getExchangeRatesWithChange();
+      return {
+        success: false,
+        message: `환율 API 호출 실패: ${result.message}. 기존 저장된 환율을 표시합니다.`,
+        data: existingRates,
+        lastUpdate: new Date().toISOString(),
+        apiError: result.message
+      };
+    }
+    
+  } catch (error) {
+    console.error('환율 강제 새로고침 오류:', error.message);
+    
+    try {
+      // 오류 발생 시에도 기존 저장된 환율 반환 시도
+      const existingRates = await getExchangeRatesWithChange();
+      return {
+        success: false,
+        message: `환율 새로고침 중 오류 발생: ${error.message}. 기존 저장된 환율을 표시합니다.`,
+        data: existingRates,
+        lastUpdate: new Date().toISOString(),
+        apiError: error.message
+      };
+    } catch (dbError) {
+      console.error('기존 환율 데이터 조회도 실패:', dbError.message);
+      return {
+        success: false,
+        message: '환율 새로고침과 기존 데이터 조회 모두 실패했습니다.',
+        data: [],
+        lastUpdate: new Date().toISOString(),
+        apiError: error.message
+      };
+    }
+  }
+};
+
 module.exports = {
   fetchAndSaveExchangeRates,
   getLatestExchangeRates,
   getExchangeRatesWithChange,
   initializeExchangeRates,
   formatDateForAPI,
-  checkAndFetchTodayExchangeRates
+  checkAndFetchTodayExchangeRates,
+  forceRefreshExchangeRates
 }; 

@@ -229,16 +229,13 @@ exports.getBatchOverseasPrice = async (req, res) => {
  * 해외 주식 수익률 계산
  * @param {Array} assets - 자산 데이터
  * @param {string} mode - "realtime" 또는 "snapshot"
+ * @param {string} targetDate - 스냅샷 모드일 때 조회할 특정 날짜 (YYYY-MM-DD)
  * @returns {Array} 수익률이 계산된 자산 배열
  */
-const calculateForeignStockReturns = async (assets, mode = 'snapshot') => {
+const calculateForeignStockReturns = async (assets, mode = 'snapshot', targetDate = null) => {
   try {
     console.log(`=== calculateForeignStockReturns ===`);
-    console.log(`mode === 'realtime': ${mode === 'realtime'}`);
-    
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterday = new Date(today.getTime() - (1 * 24 * 60 * 60 * 1000));
+    console.log(`mode: ${mode}, targetDate: ${targetDate}`);
     
     const formatDate = (date) => {
       const year = date.getFullYear();
@@ -247,8 +244,31 @@ const calculateForeignStockReturns = async (assets, mode = 'snapshot') => {
       return `${year}${month}${day}`;
     };
     
-    const yesterdayStr = formatDate(yesterday);
-    const todayStr = formatDate(today);
+    // 날짜 계산 로직 개선
+    let queryStartDate, queryEndDate;
+    
+    if (mode === 'realtime') {
+      // 실시간 모드: 날짜 불필요
+      queryStartDate = null;
+      queryEndDate = null;
+    } else {
+      // 스냅샷 모드: 특정 날짜 또는 어제 날짜 사용
+      if (targetDate) {
+        // 특정 날짜가 주어진 경우 (YYYY-MM-DD -> YYYYMMDD)
+        queryEndDate = targetDate.replace(/-/g, '');
+        // 시작 날짜는 해당 날짜로 설정 (단일 날짜 조회)
+        queryStartDate = queryEndDate;
+      } else {
+        // 기본값: 어제 날짜
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const yesterday = new Date(today.getTime() - (1 * 24 * 60 * 60 * 1000));
+        queryStartDate = formatDate(yesterday);
+        queryEndDate = formatDate(today);
+      }
+    }
+    
+    console.log(`Date range: ${queryStartDate} ~ ${queryEndDate}`);
 
     // 해외주식 필터링 - 원래 조건으로 복원
     const foreignStocks = assets.filter(asset => {
@@ -276,14 +296,17 @@ const calculateForeignStockReturns = async (assets, mode = 'snapshot') => {
           stockData = await koreaInvestmentService.getOverseasCurrentPrice(ticker, market || 'NAS');
           currentPrice = stockData.price;
         } else {
-          // 스냅샷 모드: 일일 차트 데이터로 어제 종가 가져오기
-          stockData = await koreaInvestmentService.getOverseasDailyChart(ticker, 'D', yesterdayStr, todayStr);
+          // 스냅샷 모드: 특정 날짜의 종가 가져오기
+          console.log(`${ticker} 종가 조회 중 (${queryStartDate} ~ ${queryEndDate})...`);
+          stockData = await koreaInvestmentService.getOverseasDailyChart(ticker, 'D', queryStartDate, queryEndDate);
           
           if (stockData.basicData && stockData.basicData.length > 0) {
-            const currentData = stockData.basicData[0];
-            currentPrice = currentData.close;
+            // 가장 최근 데이터 사용 (보통 마지막 요소가 최신)
+            const latestData = stockData.basicData[stockData.basicData.length - 1];
+            currentPrice = latestData.close;
+            console.log(`${ticker} 종가: $${currentPrice} (날짜: ${queryEndDate})`);
           } else {
-            throw new Error('기간별 시세 데이터가 없습니다.');
+            throw new Error(`${queryEndDate} 날짜의 시세 데이터가 없습니다.`);
           }
         }
 
@@ -328,6 +351,63 @@ const calculateForeignStockReturns = async (assets, mode = 'snapshot') => {
     return results;
   } catch (error) {
     throw error;
+  }
+};
+
+/**
+ * 웹소켓 인증키 조회
+ * 보안 고려사항: 인증된 사용자만 접근 가능, 토큰 마스킹 적용
+ */
+exports.getWebsocketToken = async (req, res) => {
+  try {
+    // 추가 보안 체크: 사용자 세션 확인
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: '인증되지 않은 사용자입니다.'
+      });
+    }
+
+    const tokenManager = require('../services/koreaInvestmentToken');
+    const websocketToken = await tokenManager.getWebsocketToken();
+
+    if (!websocketToken) {
+      return res.status(500).json({
+        success: false,
+        message: '웹소켓 인증키를 가져올 수 없습니다.'
+      });
+    }
+
+    // 토큰 마스킹 (보안 강화)
+    const maskedToken = websocketToken.length > 10 
+      ? websocketToken.substring(0, 6) + '*'.repeat(websocketToken.length - 10) + websocketToken.substring(websocketToken.length - 4)
+      : websocketToken;
+
+    // 응답 헤더에 보안 관련 정보 추가 (JSON 응답 전에 설정)
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+
+    console.log(`웹소켓 토큰 제공 (사용자: ${req.user.id}): ${maskedToken}`);
+
+    res.json({
+      success: true,
+      data: {
+        approvalKey: websocketToken, // 실제 사용을 위해 전체 토큰 제공
+        maskedKey: maskedToken // 로그용 마스킹된 토큰
+      },
+      message: '웹소켓 인증키 조회 성공'
+    });
+
+  } catch (error) {
+    console.error('웹소켓 인증키 조회 에러:', error.message);
+    res.status(500).json({
+      success: false,
+      message: '웹소켓 인증키 조회 중 오류가 발생했습니다.',
+      error: error.message
+    });
   }
 };
 

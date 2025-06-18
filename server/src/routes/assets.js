@@ -26,6 +26,9 @@ router.get('/transactions/recent', assetController.getRecentTransactions);
 // 환율 정보 조회
 router.get('/exchange-rates', assetController.getExchangeRates);
 
+// 환율 강제 새로고침 (위젯용)
+router.post('/exchange-rates/refresh', assetController.refreshExchangeRates);
+
 // 환율 데이터 초기화 (개발용)
 router.post('/exchange-rates/initialize', assetController.initializeExchangeRates);
 

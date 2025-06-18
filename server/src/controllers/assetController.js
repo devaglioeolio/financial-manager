@@ -1,5 +1,5 @@
 const Asset = require('../models/Asset');
-const { getExchangeRatesWithChange, initializeExchangeRates } = require('../services/exchangeRateService');
+const { getExchangeRatesWithChange, initializeExchangeRates, forceRefreshExchangeRates } = require('../services/exchangeRateService');
 const { calculateForeignStockReturns } = require('./koreaInvController');
 
 // 자산 목록 조회
@@ -39,6 +39,14 @@ exports.getAssets = async (req, res) => {
         transactions: asset.transactions,
         details: asset.details
       };
+
+      // 해외주식인 경우 ticker 정보 추가
+      if (mainCategory === 'STOCK' && subCategory === 'FOREIGN' && asset.details) {
+        const ticker = asset.details?.get ? asset.details.get('ticker') : asset.details.ticker;
+        if (ticker) {
+          assetInfo.ticker = ticker;
+        }
+      }
 
       // STOCK과 CRYPTO만 평균 매수가와 totalQuantity 포함
       if (mainCategory === 'STOCK' || mainCategory === 'CRYPTO') {
@@ -572,6 +580,34 @@ exports.initializeExchangeRates = async (req, res) => {
       success: false,
       message: '환율 데이터 초기화 중 오류가 발생했습니다.',
       error: error.message 
+    });
+  }
+};
+
+// 환율 강제 새로고침 (위젯에서 사용)
+exports.refreshExchangeRates = async (req, res) => {
+  try {
+    console.log('환율 강제 새로고침 요청 받음...');
+    
+    const result = await forceRefreshExchangeRates();
+    
+    // API 호출이 실패해도 기존 데이터를 반환하므로 상태 코드는 200
+    res.json({
+      success: result.success,
+      message: result.message,
+      data: result.data,
+      lastUpdate: result.lastUpdate,
+      apiError: result.apiError || null,
+      isFromCache: !result.success // API 실패 시 캐시된 데이터임을 표시
+    });
+
+  } catch (error) {
+    console.error('환율 강제 새로고침 에러:', error);
+    res.status(500).json({ 
+      success: false,
+      message: '환율 강제 새로고침 중 심각한 오류가 발생했습니다.',
+      error: error.message,
+      data: []
     });
   }
 };

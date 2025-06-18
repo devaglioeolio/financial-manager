@@ -11,7 +11,9 @@ const koreaInvRoutes = require('./routes/koreaInv');
 const stockCodeRoutes = require('./routes/stockCodes');
 const { startExchangeRateScheduler } = require('./schedulers/exchangeRateScheduler');
 const { startDailySnapshotScheduler } = require('./schedulers/dailySnapshotScheduler');
+const { createMissingSnapshotsForAllUsers } = require('./services/dailySnapshotService');
 const tokenManager = require('./services/koreaInvestmentToken');
+const websocketProxy = require('./services/websocketProxy');
 
 // 환경변수 설정
 dotenv.config();
@@ -72,6 +74,21 @@ mongoose.connect(process.env.MONGO_URI, {
   
   // 한국투자증권 토큰 초기화 (10초 지연)
   tokenManager.initializeTokens();
+  
+  // WebSocket 프록시 서버 시작
+  websocketProxy.startProxyServer(8080);
+  console.log('WebSocket 프록시 서버가 8080 포트에서 시작되었습니다.');
+  
+  // 서버 시작 시 누락된 스냅샷들을 백필 (최근 7일)
+  setTimeout(async () => {
+    try {
+      console.log('🔄 서버 시작 시 누락된 스냅샷 백필 실행...');
+      await createMissingSnapshotsForAllUsers(7);
+      console.log('✅ 누락된 스냅샷 백필 완료');
+    } catch (error) {
+      console.error('❌ 누락된 스냅샷 백필 실패:', error);
+    }
+  }, 15000); // 서버가 완전히 시작된 후 15초 뒤 실행
 })
 .catch((err) => console.error('MongoDB 연결 실패:', err));
 

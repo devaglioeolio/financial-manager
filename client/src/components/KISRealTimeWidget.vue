@@ -96,47 +96,27 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed } from 'vue'
+import { useWebSocketStockData } from '../composables/useWebSocketStockData.js'
+
+// WebSocket 실시간 데이터 관리
+const { 
+  isConnected, 
+  isConnecting, 
+  lastUpdate,
+  getAllStockPrices
+} = useWebSocketStockData()
 
 // 반응형 데이터
 const isExpanded = ref(false)
-const isConnected = ref(false)
 const isLoading = ref(false)
 const error = ref(null)
-const lastUpdate = ref(null)
-const websocket = ref(null)
 
-// 구독할 종목 리스트
-const stockSymbols = [
-  { key: 'DNASNVDA', symbol: 'NVDA', name: 'NVIDIA Corp' },
-  { key: 'DNASCEG', symbol: 'CEG', name: 'Constellation Energy Corp' },
-  { key: 'DNASGOOGL', symbol: 'GOOGL', name: 'Alphabet Inc' },
-  { key: 'DNYSJPM', symbol: 'JPM', name: 'JPMorgan Chase & Co' },
-  { key: 'DAMSGLD', symbol: 'GLD', name: 'Gold' },
-  { key: 'DAMSSGOV', symbol: 'SGOV', name: 'SGOV' }
-]
-
-// 여러 종목 데이터를 저장할 배열
-const stockDataList = ref([])
-
-// WebSocket 연결 설정
-const WEBSOCKET_URL = 'ws://ops.koreainvestment.com:21000'
-// 환경변수와 로컬스토리지에서 API 키를 안전하게 가져오기
-const getInitialApprovalKey = () => {
-  try {
-    return (import.meta.env?.VITE_KIS_TEMP_APPROVAL_KEY || localStorage.getItem('kisApprovalKey') || '')
-  } catch (e) {
-    console.warn('환경변수 또는 로컬스토리지 접근 실패:', e)
-    return ''
-  }
-}
-
-const approvalKey = ref(getInitialApprovalKey())
-
-// 종목 키로 종목 정보 찾기
-const findStockByKey = (key) => {
-  return stockSymbols.find(stock => stock.key === key)
-}
+// 전역 실시간 데이터에서 주식 목록 가져오기
+const stockDataList = computed(() => {
+  const allPrices = getAllStockPrices.value
+  return Object.values(allPrices)
+})
 
 // 심볼로 종목 데이터 찾기
 const findStockDataBySymbol = (symbol) => {
@@ -172,240 +152,12 @@ const formatUpdateTime = (dateString) => {
 
 const toggleExpanded = () => {
   isExpanded.value = !isExpanded.value
-  if (isExpanded.value && !isConnected.value && approvalKey.value) {
-    connectWebSocket()
-  }
 }
 
-const connectWebSocket = () => {
-  if (!approvalKey.value) {
-    error.value = 'Approval Key가 설정되지 않았습니다. 소스코드에서 API 키를 설정해주세요.'
-    return
-  }
+// 실시간 데이터 표시를 위한 간단한 헬퍼 함수들은 유지
 
-  isLoading.value = true
-  error.value = null
-  
-  try {
-    websocket.value = new WebSocket(WEBSOCKET_URL)
-    
-    websocket.value.onopen = () => {
-      console.log('WebSocket 연결 성공')
-      isConnected.value = true
-      isLoading.value = false
-      
-      // 모든 종목에 대해 구독 메시지 전송
-      stockSymbols.forEach(stock => {
-        const subscribeMessage = {
-          header: {
-            approval_key: approvalKey.value,
-            custtype: "P",
-            tr_type: "1",
-            "content-type": "utf-8"
-          },
-          body: {
-            input: {
-              tr_id: "HDFSCNT0",
-              tr_key: stock.key
-            }
-          }
-        }
-        
-        console.log(`${stock.symbol} 종목 구독 메시지 전송:`, subscribeMessage)
-        websocket.value.send(JSON.stringify(subscribeMessage))
-      })
-    }
-    
-    websocket.value.onmessage = (event) => {
-      try {
-        // console.log('Raw WebSocket data:', event.data)
-        
-        // 한국투자증권 웹소켓 데이터는 JSON이 아니라 문자열로 옵니다
-        // JSON 파싱을 시도하지 않고 바로 문자열로 처리
-        let data = event.data
-        
-        parseStockData(data)
-        lastUpdate.value = new Date().toISOString()
-      } catch (e) {
-        console.error('데이터 파싱 오류:', e)
-        console.error('원본 데이터:', event.data)
-      }
-    }
-    
-    websocket.value.onerror = (error) => {
-      console.error('WebSocket 오류:', error)
-      isConnected.value = false
-      isLoading.value = false
-      error.value = 'WebSocket 연결 오류'
-    }
-    
-    websocket.value.onclose = () => {
-      console.log('WebSocket 연결 종료')
-      isConnected.value = false
-      isLoading.value = false
-    }
-    
-  } catch (e) {
-    console.error('WebSocket 연결 실패:', e)
-    isLoading.value = false
-    error.value = 'WebSocket 연결에 실패했습니다'
-  }
-}
-
-const parseStockData = (data) => {
-  try {
-    
-    // 한국투자증권 WebSocket 응답 데이터 파싱 (캐럿(^) 구분)
-    if (typeof data === 'string' && data.includes('^')) {
-      const values = data.split('^')
-      
-      // 한국투자증권 해외주식 실시간 데이터 필드 순서
-      // "실시간종목코드|종목코드|수수점자리수|현지영업일자|현지일자|현지시간|한국일자|한국시간|시가|고가|저가|현재가|대비구분|전일대비|등락율|매수호가|매도호가|매수잔량|매도잔량|체결량|거래량|거래대금|매도체결량|매수체결량|체결강도|시장구분"
-      
-      if (values.length >= 15) {
-        // 첫 번째 필드에서 종목 키 추출 (파이프로 구분된 마지막 부분)
-        const firstField = values[0] || ''
-        const stockKey = firstField.includes('|') ? firstField.split('|').pop() : firstField
-        
-        const openPrice = parseFloat(values[8]) || 0    // 시가 (인덱스 8)
-        const highPrice = parseFloat(values[9]) || 0    // 고가 (인덱스 9)
-        const lowPrice = parseFloat(values[10]) || 0    // 저가 (인덱스 10)
-        const currentPrice = parseFloat(values[11]) || 0 // 현재가 (인덱스 11)
-        const changeSign = values[12] || '0'            // 대비구분 (인덱스 12)
-        const change = parseFloat(values[13]) || 0      // 전일대비 (인덱스 13)
-        const changePercent = parseFloat(values[14]) || 0 // 등락율 (인덱스 14)
-        
-        // 종목 키로 종목 정보 찾기
-        const stockInfo = findStockByKey(stockKey)
-        if (!stockInfo) {
-          console.warn('알 수 없는 종목 키:', stockKey, '(원본 데이터:', firstField, ')')
-          return
-        }
-        
-        // 전일종가 계산 (현재가 - 등락)
-        const prevClose = currentPrice - change
-        
-        // 대비구분에 따라 등락 부호 조정 (1: 상승, 2: 보합, 3: 하락, 4: 상한가, 5: 하한가)
-        let adjustedChange = change
-        let adjustedChangePercent = changePercent
-        
-        if (changeSign === '3' || changeSign === '5') { // 하락 또는 하한가
-          adjustedChange = -Math.abs(change)
-          adjustedChangePercent = -Math.abs(changePercent)
-        } else if (changeSign === '1' || changeSign === '4') { // 상승 또는 상한가
-          adjustedChange = Math.abs(change)
-          adjustedChangePercent = Math.abs(changePercent)
-        }
-        
-        // 기존 종목 데이터 찾기 또는 새로 생성
-        let existingStock = findStockDataBySymbol(stockInfo.symbol)
-        
-        if (existingStock) {
-          // 기존 데이터 업데이트
-          existingStock.currentPrice = currentPrice
-          existingStock.change = adjustedChange
-          existingStock.changePercent = adjustedChangePercent
-          existingStock.highPrice = highPrice
-          existingStock.lowPrice = lowPrice
-          existingStock.prevClose = prevClose
-        } else {
-          // 새 종목 데이터 추가
-          stockDataList.value.push({
-            symbol: stockInfo.symbol,
-            name: stockInfo.name,
-            currentPrice: currentPrice,
-            change: adjustedChange,
-            changePercent: adjustedChangePercent,
-            highPrice: highPrice,
-            lowPrice: lowPrice,
-            prevClose: prevClose
-          })
-        }
-        
-        console.log(`${stockInfo.symbol} 파싱된 주식 데이터:`, {
-          currentPrice,
-          change: adjustedChange,
-          changePercent: adjustedChangePercent,
-          highPrice,
-          lowPrice,
-          prevClose,
-          changeSign
-        })
-      }
-    }
-
-  } catch (e) {
-    console.error('주식 데이터 파싱 오류:', e)
-    console.error('파싱 실패 데이터:', data)
-  }
-}
-
-const reconnectWebSocket = () => {
-  if (websocket.value) {
-    websocket.value.close()
-  }
-  setTimeout(() => {
-    connectWebSocket()
-  }, 1000)
-}
-
-const disconnectWebSocket = () => {
-  if (websocket.value) {
-    websocket.value.close()
-    websocket.value = null
-  }
-  isConnected.value = false
-}
-
-onMounted(() => {
-  // 초기 데이터 설정 (WebSocket 연결 전까지 표시할 데이터)
-  stockDataList.value = [
-    {
-      symbol: 'NVDA',
-      name: 'NVIDIA Corp',
-      currentPrice: 875.28,
-      change: 12.45,
-      changePercent: 1.44,
-      highPrice: 880.50,
-      lowPrice: 860.25,
-      prevClose: 862.83
-    },
-    {
-      symbol: 'CEG',
-      name: 'Constellation Energy Corp',
-      currentPrice: 245.67,
-      change: -3.21,
-      changePercent: -1.29,
-      highPrice: 250.45,
-      lowPrice: 242.10,
-      prevClose: 248.88
-    },
-    {
-      symbol: 'GOOGL',
-      name: 'Alphabet Inc',
-      currentPrice: 178.24,
-      change: 2.15,
-      changePercent: 1.22,
-      highPrice: 179.88,
-      lowPrice: 175.67,
-      prevClose: 176.09
-    },
-    {
-      symbol: 'JPM',
-      name: 'JPMorgan Chase & Co',
-      currentPrice: 234.56,
-      change: 4.32,
-      changePercent: 1.88,
-      highPrice: 236.78,
-      lowPrice: 230.45,
-      prevClose: 230.24
-    }
-  ]
-})
-
-onUnmounted(() => {
-  disconnectWebSocket()
-})
+// 더 이상 자체 WebSocket 관리나 초기 데이터 설정이 필요없음
+// 전역 상태에서 실시간 데이터를 가져옴
 </script>
 
 <style scoped>

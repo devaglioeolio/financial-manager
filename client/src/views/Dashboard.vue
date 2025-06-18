@@ -6,12 +6,21 @@
         <div class="total-assets">
           <h2>총 자산</h2>
           <p class="amount">₩{{ formatNumberInt(calculatedTotalAmount) }}</p>
-          <div v-if="hasRealTimeData" class="realtime-indicator">
+          <div v-if="wsConnected || hasRealTimeData" class="realtime-indicator">
             <span class="realtime-icon">🔄</span>
-            <span class="realtime-text">실시간 반영</span>
+            <span class="realtime-text">
+              {{ wsConnected ? '웹소켓 실시간 반영' : '실시간 반영' }}
+            </span>
           </div>
-          <button v-if="categories.length > 0" @click="fetchRealTimeData" class="refresh-realtime-btn">
+          <div v-if="wsConnecting" class="realtime-indicator">
+            <span class="realtime-icon">⏳</span>
+            <span class="realtime-text">연결 중...</span>
+          </div>
+          <button v-if="categories.length > 0 && !wsConnected" @click="fetchRealTimeData" class="refresh-realtime-btn">
             실시간 데이터 새로고침
+          </button>
+          <button v-if="wsConnected" @click="reconnectWebSocket" class="refresh-realtime-btn">
+            웹소켓 재연결
           </button>
         </div>
       </div>
@@ -59,9 +68,14 @@
               </button>
               <div class="segment-indicator" :style="segmentIndicatorStyle"></div>
             </div>
-            <button class="refresh-btn" @click="fetchDailyAssets" title="새로고침">
-              ↻
-            </button>
+            <div class="control-buttons">
+              <button class="refresh-btn" @click="fetchDailyAssets" title="새로고침">
+                ↻
+              </button>
+              <button class="backfill-btn" @click="backfillMissingSnapshots" title="누락된 데이터 보완" :disabled="backfillLoading">
+                {{ backfillLoading ? '⏳' : '🔧' }}
+              </button>
+            </div>
           </div>
         </div>
         <div class="chart-wrapper">
@@ -119,6 +133,9 @@
                             :class="{ 'profit': asset.unrealizedGainKRW > 0, 'loss': asset.unrealizedGainKRW < 0 }">
                         {{ asset.unrealizedGainKRW > 0 ? '+' : '' }}₩{{ formatNumberInt(Math.abs(asset.unrealizedGainKRW)) }}
                         ({{ asset.returnRate > 0 ? '+' : '' }}{{ asset.returnRate.toFixed(2) }}%)
+                        <span class="data-source-indicator" :class="{ 'websocket': asset.isWebSocketData, 'api': !asset.isWebSocketData }">
+                          {{ asset.isWebSocketData ? '🔴 LIVE' : '📊 API' }}
+                        </span>
                       </span>
                     </div>
                   </div>
@@ -546,15 +563,29 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { Pie as PieChart, Line as LineChart } from 'vue-chartjs'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement } from 'chart.js'
 import axios from 'axios'
 import ExchangeRateWidget from '../components/ExchangeRateWidget.vue'
 import KISRealTimeWidget from '../components/KISRealTimeWidget.vue'
 import ForeignStockWidget from '../components/ForeignStockWidget.vue'
+import { useWebSocketStockData } from '../composables/useWebSocketStockData.js'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement)
+
+// WebSocket 실시간 데이터 관리
+const { 
+  isConnected: wsConnected, 
+  isConnecting: wsConnecting, 
+  lastUpdate: wsLastUpdate,
+  connectWebSocket, 
+  disconnectWebSocket,
+  reconnectWebSocket,
+  applyRealTimePrices,
+  getStockPrice,
+  getAllStockPrices
+} = useWebSocketStockData()
 
 const totalAmount = ref(0)
 const categories = ref([])
@@ -563,6 +594,7 @@ const realTimeStockData = ref({})
 const realTimeExchangeRates = ref({})
 const realTimeExchangeRatesForWidget = ref({})
 const realTimeDataLoading = ref(true)
+const backfillLoading = ref(false)
 const activeTab = ref('monthly')
 const selectedDays = ref(7)
 const activeDetailTab = ref('assets')
@@ -640,7 +672,9 @@ const stockDataArray = computed(() => {
   if (!realTimeStockData.value || typeof realTimeStockData.value !== 'object') {
     return []
   }
-  return Object.values(realTimeStockData.value).filter(stock => stock && (stock.assetId || stock.name))
+  // 기존 데이터에 실시간 가격 적용
+  const originalData = Object.values(realTimeStockData.value).filter(stock => stock && (stock.assetId || stock.name))
+  return applyRealTimePrices(originalData)
 })
 
 // 실시간 데이터가 적용된 파이 차트 데이터
@@ -779,16 +813,40 @@ const segmentIndicatorStyle = computed(() => {
 
 // 실시간 데이터를 적용한 계산된 자산 정보
 const calculatedAssets = computed(() => {
-  if (!hasRealTimeData.value) return categories.value
-
   return categories.value.map(category => ({
     ...category,
     subCategories: category.subCategories.map(subCategory => ({
       ...subCategory,
       assets: subCategory.assets.map(asset => {
         if (subCategory.category === 'FOREIGN' && asset.totalQuantity) {
-          const stockData = realTimeStockData.value[asset.id]
-          const usdRate = realTimeExchangeRates.value['USD']
+          let stockData = null
+          let usdRate = null
+          let isWebSocketData = false
+
+          // ticker 정보 추출 (asset.ticker 또는 details에서)
+          const ticker = asset.ticker || asset.details?.ticker || asset.symbol
+
+          console.log(`자산 처리 중: ${asset.name}, ticker: ${ticker}, wsConnected: ${wsConnected.value}`)
+
+          // 데이터 소스 우선순위: 웹소켓 실제 데이터 > API 데이터 > 원본 데이터
+          // 1순위: 웹소켓 데이터가 실제로 있는 경우
+          if (wsConnected.value && ticker && getStockPrice(ticker)) {
+            stockData = getStockPrice(ticker)
+            usdRate = realTimeExchangeRates.value['USD'] || 1350
+            isWebSocketData = true
+            console.log(`✅ 웹소켓 실시간 데이터 사용: ${ticker}`, stockData)
+          } 
+          // 2순위: API 현재가 데이터가 있는 경우 (웹소켓 연결되어도 실시간 데이터 없으면 API 사용)
+          else if (hasRealTimeData.value && realTimeStockData.value[asset.id]) {
+            stockData = realTimeStockData.value[asset.id]
+            usdRate = realTimeExchangeRates.value['USD']
+            isWebSocketData = false
+            console.log(`📊 API 현재가 데이터 사용: ${asset.name}`, stockData)
+          }
+          // 3순위: 원본 자산 데이터 (구매 시점 가격) - 로그만 출력하고 stockData는 null로 유지
+          else {
+            console.log(`📋 원본 자산 데이터만 사용: ${asset.name} (현재가 정보 없음)`)
+          }
           
           if (stockData && usdRate) {
             // 실시간 현재가치 (USD)
@@ -809,11 +867,12 @@ const calculatedAssets = computed(() => {
               returnRate,
               currentAmountInKRW,
               currentExchangeRate: usdRate,
-              hasRealTimeData: true
+              hasRealTimeData: true,
+              isWebSocketData // 웹소켓 데이터인지 API 데이터인지 구분
             }
           }
         }
-        return { ...asset, hasRealTimeData: false }
+        return { ...asset, hasRealTimeData: false, isWebSocketData: false }
       })
     }))
   }))
@@ -821,21 +880,25 @@ const calculatedAssets = computed(() => {
 
 // 실시간 데이터가 적용된 총 자산 계산
 const calculatedTotalAmount = computed(() => {
-  if (!hasRealTimeData.value) return totalAmount.value
-
-  return calculatedAssets.value.reduce((total, category) => {
-    return total + category.subCategories.reduce((catTotal, subCategory) => {
-      return catTotal + subCategory.assets.reduce((subTotal, asset) => {
-        if (asset.hasRealTimeData) {
-          return subTotal + asset.currentAmountInKRW
-        } else if (subCategory.category === 'FOREIGN') {
-          return subTotal + asset.amountInKRW
-        } else {
-          return subTotal + asset.amount
-        }
+  // 웹소켓 연결 또는 API를 통한 실시간 데이터가 있는 경우 계산된 자산 사용
+  if (wsConnected.value || hasRealTimeData.value) {
+    return calculatedAssets.value.reduce((total, category) => {
+      return total + category.subCategories.reduce((catTotal, subCategory) => {
+        return catTotal + subCategory.assets.reduce((subTotal, asset) => {
+          if (asset.hasRealTimeData) {
+            return subTotal + asset.currentAmountInKRW
+          } else if (subCategory.category === 'FOREIGN') {
+            return subTotal + asset.amountInKRW
+          } else {
+            return subTotal + asset.amount
+          }
+        }, 0)
       }, 0)
     }, 0)
-  }, 0)
+  }
+  
+  // 실시간 데이터가 없는 경우 기본 총액 사용
+  return totalAmount.value
 })
 
 const fetchAssets = async () => {
@@ -994,6 +1057,35 @@ const fetchRecentTransactions = async () => {
     recentTransactions.value = transactions
   } catch (error) {
     console.error('최근 거래 내역 조회 실패:', error)
+  }
+}
+
+// 누락된 스냅샷 백필
+const backfillMissingSnapshots = async () => {
+  if (backfillLoading.value) return
+  
+  backfillLoading.value = true
+  try {
+    console.log('누락된 스냅샷 백필 시작...')
+    
+    const response = await axios.post('/api/asset-snapshots/backfill', {
+      days: 14 // 최근 14일 체크
+    })
+    
+    if (response.data.success) {
+      const result = response.data.data
+      const message = `백필 완료! 생성: ${result.created}개, 건너뜀: ${result.skipped}개, 오류: ${result.errors}개`
+      alert(message)
+      console.log('백필 결과:', result)
+      
+      // 백필 후 차트 데이터 새로고침
+      await fetchDailyAssets()
+    }
+  } catch (error) {
+    console.error('누락된 스냅샷 백필 실패:', error)
+    alert('누락된 스냅샷 백필에 실패했습니다: ' + (error.response?.data?.message || error.message))
+  } finally {
+    backfillLoading.value = false
   }
 }
 
@@ -1260,12 +1352,59 @@ const selectedAsset = computed(() => {
   return tradableAssets.value.find(asset => asset.id === newTransaction.value.assetId)
 })
 
-onMounted(() => {
-  fetchAssets()
-  fetchMonthlyAssets()
-  fetchDailyAssets()
-  fetchRecentTransactions()
-  fetchRealTimeData()
+// WebSocket 연결 상태 변경 감지
+watch(wsConnected, async (newVal, oldVal) => {
+  console.log(`WebSocket 연결 상태 변경: ${oldVal} -> ${newVal}`)
+  
+  if (newVal) {
+    // WebSocket 연결됨 - 초기에는 API 현재가 데이터도 함께 준비
+    console.log('WebSocket 연결됨 - API 현재가 데이터와 환율 정보 가져오기')
+    await fetchRealTimeData() // 웹소켓 데이터가 올 때까지 API 데이터 사용
+    hasRealTimeData.value = true
+  } else if (oldVal !== undefined) {
+    // WebSocket 연결 끊어짐 (초기값이 아닌 경우) - API 데이터로 대체
+    console.log('WebSocket 연결 끊어짐 - API 데이터로 대체')
+    await fetchRealTimeData()
+  }
+})
+
+// 디버깅용 함수 - 웹소켓 데이터 상태 확인
+const debugWebSocketData = () => {
+  console.log('=== 웹소켓 데이터 상태 확인 ===')
+  console.log('wsConnected:', wsConnected.value)
+  console.log('getAllStockPrices:', getAllStockPrices.value)
+  console.log('realTimeExchangeRates:', realTimeExchangeRates.value)
+  
+  // 자산별 ticker 확인
+  categories.value.forEach(category => {
+    category.subCategories.forEach(subCategory => {
+      if (subCategory.category === 'FOREIGN') {
+        subCategory.assets.forEach(asset => {
+          const ticker = asset.ticker || asset.details?.ticker || asset.symbol
+          console.log(`자산: ${asset.name}, ticker: ${ticker}, 웹소켓 데이터:`, getStockPrice(ticker))
+        })
+      }
+    })
+  })
+}
+
+onMounted(async () => {
+  // 기본 데이터 먼저 로드
+  await Promise.all([
+    fetchAssets(),
+    fetchMonthlyAssets(),
+    fetchDailyAssets(),
+    fetchRecentTransactions()
+  ])
+  
+  // API 현재가 데이터 먼저 호출 (웹소켓 연결 상관없이)
+  await fetchRealTimeData()
+  
+  // WebSocket 연결 시도 (연결되면 실시간 데이터가 오기 시작)
+  await connectWebSocket()
+  
+  // 5초 후 디버깅 정보 출력
+  setTimeout(debugWebSocketData, 5000)
 })
 </script>
 
@@ -1552,6 +1691,25 @@ onMounted(() => {
   border: 1px solid #bbdefb;
 }
 
+.data-source-indicator {
+  font-size: 0.7em;
+  font-weight: 700;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  margin-left: 0.5em;
+  text-transform: uppercase;
+}
+
+.data-source-indicator.websocket {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.data-source-indicator.api {
+  background-color: #FF9800;
+  color: white;
+}
+
 .chart-wrapper {
   flex: 1;
   min-height: 0;
@@ -1571,6 +1729,11 @@ onMounted(() => {
   justify-content: center;
 }
 
+.control-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .refresh-btn {
   padding: 0.5rem 0.75rem;
   border: 2px solid #4CAF50;
@@ -1588,6 +1751,31 @@ onMounted(() => {
   color: white;
   transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(76, 175, 80, 0.2);
+}
+
+.backfill-btn {
+  padding: 0.5rem 0.75rem;
+  border: 2px solid #FF9800;
+  background: white;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  color: #FF9800;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(255, 152, 0, 0.1);
+}
+
+.backfill-btn:hover:not(:disabled) {
+  background: #FF9800;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(255, 152, 0, 0.2);
+}
+
+.backfill-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* 세그먼트 컨트롤 */
