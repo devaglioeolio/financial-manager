@@ -8,6 +8,88 @@ class WebSocketProxyService {
     this.clientConnections = new Map(); // userId -> WebSocket connection
     this.subscribedSymbols = new Set(); // 현재 구독 중인 종목들
     this.userSymbols = new Map(); // userId -> Set of symbols
+    
+    // 재연결 관련 변수들
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 10;
+    this.reconnectInterval = 5000; // 5초
+    this.reconnectTimer = null;
+    this.lastDisconnectTime = null;
+    this.isMarketOpen = true; // 시장 개장 여부
+    this.heartbeatInterval = null;
+    this.lastHeartbeatTime = null;
+  }
+
+  /**
+   * 현재 시간이 시장 개장 시간인지 확인
+   */
+  isMarketOpenTime() {
+    const now = new Date();
+    const koreaTime = new Date(now.getTime() + (9 * 60 * 60 * 1000)); // KST
+    const day = koreaTime.getDay(); // 0: 일요일, 1: 월요일, ..., 6: 토요일
+    const hour = koreaTime.getHours();
+    
+    // 주말은 무조건 시장 마감
+    if (day === 0 || day === 6) {
+      return false;
+    }
+    
+    // 평일이지만 시장 시간 외 (밤 11시 ~ 새벽 6시는 대부분 마감)
+    if (hour < 6 || hour > 23) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  /**
+   * 재연결 간격 계산 (백오프 알고리즘)
+   */
+  getReconnectDelay() {
+    // 시장이 닫혀있으면 더 긴 간격으로 재연결 시도
+    if (!this.isMarketOpenTime()) {
+      return Math.min(300000, 60000 * Math.pow(2, this.reconnectAttempts)); // 최대 5분
+    }
+    
+    // 시장 개장 시간에는 짧은 간격으로 재연결
+    return Math.min(60000, this.reconnectInterval * Math.pow(2, this.reconnectAttempts)); // 최대 1분
+  }
+
+  /**
+   * 하트비트 전송
+   */
+  sendHeartbeat() {
+    if (this.kisWebSocket && this.kisWebSocket.readyState === WebSocket.OPEN) {
+      try {
+        // 단순 ping 메시지 전송
+        this.kisWebSocket.ping();
+        this.lastHeartbeatTime = Date.now();
+        console.log('📡 하트비트 전송');
+      } catch (error) {
+        console.error('하트비트 전송 실패:', error);
+      }
+    }
+  }
+
+  /**
+   * 하트비트 시작
+   */
+  startHeartbeat() {
+    this.stopHeartbeat(); // 기존 하트비트 정리
+    
+    this.heartbeatInterval = setInterval(() => {
+      this.sendHeartbeat();
+    }, 30000); // 30초마다 하트비트
+  }
+
+  /**
+   * 하트비트 정지
+   */
+  stopHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
   }
 
   /**
@@ -20,6 +102,10 @@ class WebSocketProxyService {
     this.wss.on('connection', (ws, req) => {
       console.log('클라이언트 WebSocket 연결');
       this.handleClientConnection(ws, req);
+    });
+
+    this.wss.on('error', (error) => {
+      console.error('WebSocket 프록시 서버 오류:', error);
     });
   }
 
@@ -194,31 +280,90 @@ class WebSocketProxyService {
         return; // 이미 연결됨
       }
 
+      // 시장 개장 시간 체크
+      this.isMarketOpen = this.isMarketOpenTime();
+      console.log(`🏢 시장 개장 여부: ${this.isMarketOpen ? '개장' : '마감'}`);
+
       const approvalKey = await tokenManager.getWebsocketToken();
       this.kisWebSocket = new WebSocket('ws://ops.koreainvestment.com:21000');
 
       this.kisWebSocket.on('open', () => {
-        console.log('한국투자증권 WebSocket 연결 성공');
+        console.log('✅ 한국투자증권 WebSocket 연결 성공');
+        this.reconnectAttempts = 0; // 성공 시 재연결 카운터 리셋
+        this.startHeartbeat(); // 하트비트 시작
       });
 
       this.kisWebSocket.on('message', (data) => {
         this.handleKISMessage(data);
       });
 
-      this.kisWebSocket.on('close', () => {
-        console.log('한국투자증권 WebSocket 연결 종료');
+      this.kisWebSocket.on('pong', () => {
+        console.log('💓 하트비트 응답 수신');
+      });
+
+      this.kisWebSocket.on('close', (code, reason) => {
+        console.log(`❌ 한국투자증권 WebSocket 연결 종료 (코드: ${code}, 사유: ${reason})`);
         this.kisWebSocket = null;
-        // 재연결 로직
-        setTimeout(() => this.connectToKIS(), 5000);
+        this.lastDisconnectTime = Date.now();
+        this.stopHeartbeat(); // 하트비트 정지
+        
+        // 스마트 재연결 로직
+        this.scheduleReconnect();
       });
 
       this.kisWebSocket.on('error', (error) => {
-        console.error('한국투자증권 WebSocket 오류:', error);
+        console.error('🚨 한국투자증권 WebSocket 오류:', error);
+        this.stopHeartbeat(); // 하트비트 정지
       });
 
     } catch (error) {
       console.error('한국투자증권 WebSocket 연결 실패:', error);
+      this.scheduleReconnect();
     }
+  }
+
+  /**
+   * 스마트 재연결 스케줄링
+   */
+  scheduleReconnect() {
+    // 기존 재연결 타이머 클리어
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+
+    // 최대 재연결 시도 횟수 체크
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('🛑 최대 재연결 시도 횟수 초과, 재연결 중단');
+      
+      // 1시간 후 재연결 시도 횟수 리셋
+      setTimeout(() => {
+        console.log('🔄 재연결 시도 횟수 리셋');
+        this.reconnectAttempts = 0;
+        this.scheduleReconnect();
+      }, 3600000); // 1시간
+      
+      return;
+    }
+
+    const delay = this.getReconnectDelay();
+    this.reconnectAttempts++;
+
+    console.log(`🔄 ${delay/1000}초 후 재연결 시도 (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    
+    this.reconnectTimer = setTimeout(async () => {
+      // 재연결 전 시장 상태 다시 확인
+      const currentMarketStatus = this.isMarketOpenTime();
+      
+      if (!currentMarketStatus && this.reconnectAttempts > 3) {
+        console.log('🏢 시장 마감 시간으로 판단, 재연결 지연');
+        // 시장 마감 시간에는 더 긴 간격으로 재시도
+        this.reconnectAttempts = Math.max(this.reconnectAttempts - 1, 3);
+        this.scheduleReconnect();
+        return;
+      }
+
+      await this.connectToKIS();
+    }, delay);
   }
 
   /**
@@ -381,6 +526,17 @@ class WebSocketProxyService {
    * 프록시 서버 종료
    */
   stop() {
+    console.log('🛑 WebSocket 프록시 서버 종료 시작...');
+    
+    // 재연결 타이머 정리
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    
+    // 하트비트 정리
+    this.stopHeartbeat();
+    
     if (this.wss) {
       this.wss.close();
     }
@@ -390,6 +546,12 @@ class WebSocketProxyService {
     this.clientConnections.clear();
     this.userSymbols.clear();
     this.subscribedSymbols.clear();
+    
+    // 재연결 관련 변수 리셋
+    this.reconnectAttempts = 0;
+    this.lastDisconnectTime = null;
+    
+    console.log('✅ WebSocket 프록시 서버 종료 완료');
   }
 }
 

@@ -15,6 +15,52 @@
     </div>
 
     <div class="widget-content">
+      <!-- 총 합계 요약 -->
+      <div v-if="!effectiveLoading && effectiveStockData.length > 0" class="portfolio-summary">
+        <div class="summary-item">
+          <span class="summary-label">총 투자금액</span>
+          <span class="summary-value">${{ formatNumber(totalInvestment) }}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">총 현재가치</span>
+          <span class="summary-value">${{ formatNumber(totalCurrentValue) }}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">총 수익</span>
+          <span class="summary-value" :class="getSummaryColorClass(totalGain)">
+            {{ totalGain > 0 ? '+' : '' }}${{ formatNumber(Math.abs(totalGain)) }}
+          </span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">총 수익률</span>
+          <span class="summary-value" :class="getSummaryColorClass(totalGain)">
+            {{ totalGain > 0 ? '+' : '' }}{{ totalReturnRate.toFixed(2) }}%
+          </span>
+        </div>
+      </div>
+
+      <!-- 분포 차트 -->
+      <div v-if="!effectiveLoading && effectiveStockData.length > 0" class="distribution-chart">
+        <h4 class="chart-title">포트폴리오 분포</h4>
+        <div class="chart-container">
+          <canvas ref="chartCanvas" width="200" height="200"></canvas>
+        </div>
+        <div class="chart-legend">
+          <div 
+            v-for="(item, index) in chartData" 
+            :key="item.name"
+            class="legend-item"
+          >
+            <div 
+              class="legend-color" 
+              :style="{ backgroundColor: item.color }"
+            ></div>
+            <span class="legend-name">{{ item.name }}</span>
+            <span class="legend-percent">{{ item.percentage.toFixed(1) }}%</span>
+          </div>
+        </div>
+      </div>
+
       <!-- 로딩 상태 -->
       <div v-if="effectiveLoading" class="loading-state">
         <div class="loading-spinner"></div>
@@ -40,11 +86,7 @@
           v-for="stock in effectiveStockData" 
           :key="stock.assetId"
           class="stock-item"
-          :class="{ 
-            'profit': stock.returnRate > 0, 
-            'loss': stock.returnRate < 0,
-            'error': stock.error 
-          }"
+          :class="getStockColorClass(stock.returnRate)"
         >
           <!-- 에러가 있는 주식 -->
           <div v-if="stock.error" class="stock-error">
@@ -81,14 +123,14 @@
             <div class="return-section">
               <div class="return-rate">
                 <span class="return-label">수익률</span>
-                <span class="return-value" :class="{ 'profit': (stock.returnRate || 0) > 0, 'loss': (stock.returnRate || 0) < 0 }">
+                <span class="return-value" :class="getReturnColorClass(stock.returnRate || 0)">
                   {{ (stock.returnRate || 0) > 0 ? '+' : '' }}{{ (stock.returnRate || 0).toFixed(2) }}%
                 </span>
               </div>
 
               <div class="return-amount">
                 <span class="amount-label">평가손익</span>
-                <span class="amount-value" :class="{ 'profit': (stock.unrealizedGain || 0) > 0, 'loss': (stock.unrealizedGain || 0) < 0 }">
+                <span class="amount-value" :class="getReturnColorClass(stock.unrealizedGain || 0)">
                   {{ (stock.unrealizedGain || 0) > 0 ? '+' : '' }}${{ formatNumber(Math.abs(stock.unrealizedGain || 0)) }}
                 </span>
               </div>
@@ -114,7 +156,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import axios from 'axios'
 
 // Props 정의
@@ -133,6 +175,7 @@ const localStockData = ref([])
 const localLoading = ref(false)
 const error = ref(false)
 const lastUpdate = ref(null)
+const chartCanvas = ref(null)
 
 // props가 있으면 props 사용, 없으면 로컬 데이터 사용
 const effectiveStockData = computed(() => {
@@ -141,6 +184,42 @@ const effectiveStockData = computed(() => {
 
 const effectiveLoading = computed(() => {
   return props.loading || localLoading.value
+})
+
+// 총 합계 계산
+const totalCurrentValue = computed(() => {
+  return effectiveStockData.value.reduce((sum, stock) => {
+    return sum + (stock.currentValue || 0)
+  }, 0)
+})
+
+const totalInvestment = computed(() => {
+  return effectiveStockData.value.reduce((sum, stock) => {
+    return sum + ((stock.currentValue || 0) - (stock.unrealizedGain || 0))
+  }, 0)
+})
+
+const totalGain = computed(() => {
+  return effectiveStockData.value.reduce((sum, stock) => {
+    return sum + (stock.unrealizedGain || 0)
+  }, 0)
+})
+
+const totalReturnRate = computed(() => {
+  if (totalInvestment.value === 0) return 0
+  return (totalGain.value / totalInvestment.value) * 100
+})
+
+// 차트 데이터
+const chartData = computed(() => {
+  if (effectiveStockData.value.length === 0) return []
+  
+  return effectiveStockData.value.map((stock, index) => ({
+    name: stock.name,
+    value: stock.currentValue || 0,
+    percentage: ((stock.currentValue || 0) / totalCurrentValue.value) * 100,
+    color: getChartColor(index)
+  })).sort((a, b) => b.value - a.value)
 })
 
 const formatNumber = (number) => {
@@ -170,6 +249,66 @@ const formatUpdateTime = (dateString) => {
   }
 }
 
+// 수익률 기반 색상 클래스 (세분화)
+const getReturnColorClass = (value) => {
+  if (value >= 5) return 'profit-high'
+  if (value > 0) return 'profit-low'
+  if (value >= -5) return 'loss-low'
+  return 'loss-high'
+}
+
+const getStockColorClass = (returnRate) => {
+  if (returnRate >= 5) return 'stock-profit-high'
+  if (returnRate > 0) return 'stock-profit-low'
+  if (returnRate >= -5) return 'stock-loss-low'
+  if (returnRate < -5) return 'stock-loss-high'
+  return ''
+}
+
+const getSummaryColorClass = (value) => {
+  return value > 0 ? 'summary-profit' : value < 0 ? 'summary-loss' : ''
+}
+
+// 차트 색상 생성
+const getChartColor = (index) => {
+  const colors = [
+    '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#DDA0DD',
+    '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9', '#F8C471'
+  ]
+  return colors[index % colors.length]
+}
+
+// 도넛 차트 그리기
+const drawChart = () => {
+  if (!chartCanvas.value || chartData.value.length === 0) return
+  
+  const canvas = chartCanvas.value
+  const ctx = canvas.getContext('2d')
+  const centerX = canvas.width / 2
+  const centerY = canvas.height / 2
+  const radius = 80
+  const innerRadius = 45
+  
+  // 캔버스 클리어
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  
+  let currentAngle = -Math.PI / 2 // 12시 방향부터 시작
+  
+  chartData.value.forEach(item => {
+    const sliceAngle = (item.percentage / 100) * 2 * Math.PI
+    
+    // 바깥쪽 원호
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, radius, currentAngle, currentAngle + sliceAngle)
+    ctx.arc(centerX, centerY, innerRadius, currentAngle + sliceAngle, currentAngle, true)
+    ctx.closePath()
+    ctx.fillStyle = item.color
+    ctx.fill()
+    
+    currentAngle += sliceAngle
+  })
+}
+
 const fetchStockData = async () => {
   localLoading.value = true
   error.value = false
@@ -179,6 +318,8 @@ const fetchStockData = async () => {
     if (response.data.success) {
       localStockData.value = response.data.data
       lastUpdate.value = response.data.lastUpdate
+      await nextTick()
+      drawChart()
     } else {
       throw new Error('API 응답 오류')
     }
@@ -190,10 +331,18 @@ const fetchStockData = async () => {
   }
 }
 
+// 데이터 변경 시 차트 다시 그리기
+watch(effectiveStockData, async () => {
+  await nextTick()
+  drawChart()
+}, { deep: true })
+
 onMounted(() => {
   // 부모에서 로딩 중이면 기다리고, props가 없으면서 로딩도 아닐 때만 독립적으로 호출
   if (props.stockData.length === 0 && !props.loading) {
     fetchStockData()
+  } else if (props.stockData.length > 0) {
+    nextTick(() => drawChart())
   }
 })
 </script>
@@ -265,6 +414,97 @@ onMounted(() => {
   padding: 1rem;
 }
 
+/* 총 합계 요약 스타일 */
+.portfolio-summary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, #f8f9ff 0%, #f0f2ff 100%);
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  border: 1px solid #e8eaff;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.summary-label {
+  font-size: 0.8rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.summary-value {
+  font-size: 1rem;  
+  font-weight: 700;
+  color: #333;
+}
+
+.summary-profit {
+  color: #e53e3e !important;
+}
+
+.summary-loss {
+  color: #3182ce !important;
+}
+
+/* 분포 차트 스타일 */
+.distribution-chart {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #fafbff;
+  border-radius: 8px;
+  border: 1px solid #f0f2ff;
+}
+
+.chart-title {
+  margin: 0 0 1rem 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
+.chart-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.chart-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.legend-name {
+  flex: 1;
+  color: #333;
+}
+
+.legend-percent {
+  color: #666;
+  font-weight: 600;
+}
+
 .loading-state, .error-state, .empty-state {
   text-align: center;
   padding: 2rem 1rem;
@@ -321,14 +561,25 @@ onMounted(() => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-.stock-item.profit {
-  border-left: 4px solid #f44336;
-  background: rgba(244, 67, 54, 0.02);
+/* 강화된 수익률 색상 */
+.stock-profit-high {
+  border-left: 4px solid #e53e3e;
+  background: rgba(229, 62, 62, 0.03);
 }
 
-.stock-item.loss {
-  border-left: 4px solid #2196F3;
-  background: rgba(33, 150, 243, 0.02);
+.stock-profit-low {
+  border-left: 4px solid #fc8181;
+  background: rgba(252, 129, 129, 0.02);
+}
+
+.stock-loss-low {
+  border-left: 4px solid #63b3ed;
+  background: rgba(99, 179, 237, 0.02);
+}
+
+.stock-loss-high {
+  border-left: 4px solid #3182ce;
+  background: rgba(49, 130, 206, 0.03);
 }
 
 .stock-item.error {
@@ -396,19 +647,32 @@ onMounted(() => {
 }
 
 .positive {
-  color: #f44336;
+  color: #e53e3e;
 }
 
 .negative {
-  color: #2196F3;
+  color: #3182ce;
 }
 
-.profit {
-  color: #f44336;
+/* 세분화된 수익률 색상 */
+.profit-high {
+  color: #e53e3e;
+  font-weight: 700;
 }
 
-.loss {
-  color: #2196F3;
+.profit-low {
+  color: #fc8181;
+  font-weight: 600;
+}
+
+.loss-low {
+  color: #63b3ed;
+  font-weight: 600;
+}
+
+.loss-high {
+  color: #3182ce;
+  font-weight: 700;
 }
 
 .update-info {
@@ -424,6 +688,11 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
+  .portfolio-summary {
+    grid-template-columns: 1fr;
+    gap: 0.8rem;
+  }
+  
   .stock-header {
     flex-direction: column;
     gap: 0.5rem;
@@ -433,6 +702,10 @@ onMounted(() => {
     flex-direction: column;
     gap: 0.75rem;
     align-items: flex-start;
+  }
+  
+  .chart-legend {
+    font-size: 0.75rem;
   }
 }
 </style> 
