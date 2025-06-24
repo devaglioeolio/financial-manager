@@ -5,10 +5,26 @@ exports.searchStocks = async (req, res) => {
   try {
     const { query, market, limit = 20, exact = false } = req.query;
     
+    console.log('종목 검색 요청:', { query, market, limit, exact });
+    
     if (!query || query.length < 1) {
       return res.status(400).json({
         success: false,
         message: '검색어를 입력해주세요. (최소 1글자)'
+      });
+    }
+    
+    // 먼저 전체 종목 수 확인
+    const totalCount = await StockCode.countDocuments();
+    console.log('전체 종목 수:', totalCount);
+    
+    if (totalCount === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        count: 0,
+        message: '종목 데이터가 없습니다. 데이터를 import 해주세요.',
+        query: query
       });
     }
     
@@ -35,43 +51,25 @@ exports.searchStocks = async (req, res) => {
         results = [exactMatch];
       }
     } else {
-      // 기존 부분 검색 로직
-      const searchOptions = [
-        // 정확한 티커 매칭 (우선순위 높음)
-        { ...searchCondition, ticker: query.toUpperCase() },
-        
-        // 티커 시작 부분 매칭
-        { ...searchCondition, ticker: { $regex: `^${query.toUpperCase()}`, $options: 'i' } },
-        
-        // 영어 회사명 검색
-        { ...searchCondition, englishName: { $regex: query, $options: 'i' } },
-        
-        // 한글 회사명 검색 (있는 경우)
-        { ...searchCondition, koreanName: { $regex: query, $options: 'i' } }
-      ];
+      // 단순화된 검색 - 하나의 조건으로 통합
+      const searchPattern = {
+        ...searchCondition,
+        $or: [
+          { ticker: { $regex: query.toUpperCase(), $options: 'i' } },
+          { englishName: { $regex: query, $options: 'i' } },
+          { koreanName: { $regex: query, $options: 'i' } }
+        ]
+      };
       
-      const seenTickers = new Set();
+      console.log('검색 조건:', JSON.stringify(searchPattern, null, 2));
       
-      // 각 검색 조건별로 결과 수집 (중복 제거)
-      for (const condition of searchOptions) {
-        const stocks = await StockCode.find(condition)
-          .limit(parseInt(limit))
-          .sort({ ticker: 1 })
-          .select('market ticker koreanName englishName stockType');
-        
-        for (const stock of stocks) {
-          const key = `${stock.market}-${stock.ticker}`;
-          if (!seenTickers.has(key)) {
-            seenTickers.add(key);
-            results.push(stock);
-          }
-        }
-        
-        if (results.length >= parseInt(limit)) break;
-      }
-      
-      results = results.slice(0, parseInt(limit));
+      results = await StockCode.find(searchPattern)
+        .limit(parseInt(limit))
+        .sort({ ticker: 1 })
+        .select('market ticker koreanName englishName stockType');
     }
+    
+    console.log('검색 결과 수:', results.length);
     
     res.json({
       success: true,
@@ -170,7 +168,7 @@ exports.getPopularStocks = async (req, res) => {
     const { market, limit = 10 } = req.query;
     
     const searchCondition = { isActive: true };
-    if (market && ['NASDAQ', 'NYSE', 'AMEX'].includes(market.toUpperCase())) {
+    if (market && ['NAS', 'NYS', 'AMS'].includes(market.toUpperCase())) {
       searchCondition.market = market.toUpperCase();
     }
     

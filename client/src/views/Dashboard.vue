@@ -86,6 +86,11 @@
         </div>
       </div>
       
+      <!-- 관심종목 위젯 -->
+      <div class="chart-container watchlist-container">
+        <WatchlistWidget />
+      </div>
+      
       <div class="chart-container asset-detail-container">
         <div class="detail-header">
           <div class="detail-tabs">
@@ -570,6 +575,7 @@ import axios from 'axios'
 import ExchangeRateWidget from '../components/ExchangeRateWidget.vue'
 import KISRealTimeWidget from '../components/KISRealTimeWidget.vue'
 import ForeignStockWidget from '../components/ForeignStockWidget.vue'
+import WatchlistWidget from '../components/WatchlistWidget.vue'
 import { useWebSocketStockData } from '../composables/useWebSocketStockData.js'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement)
@@ -1540,6 +1546,13 @@ onMounted(async () => {
   background: #2196F3;
   border-color: #2196F3;
   color: white;
+}
+
+/* 관심종목 위젯 컨테이너 */
+.watchlist-container {
+  padding: 0; /* 관심종목 위젯 자체에 패딩이 있으므로 제거 */
+  background: transparent; /* 위젯 자체 배경을 사용 */
+  box-shadow: none; /* 위젯 자체 그림자를 사용 */
 }
 
 /* 자산 상세 컨테이너만 높이 확장 및 전체 너비 사용 */

@@ -173,6 +173,44 @@ class WebSocketProxyService {
   }
 
   /**
+   * 사용자의 관심종목이 변경되었을 때 구독 업데이트
+   */
+  async updateUserWatchlistSubscription(userId) {
+    try {
+      console.log(`🔄 사용자 ${userId}의 관심종목 구독 업데이트 시작`);
+      
+      // 기존 구독 정보 백업
+      const oldSymbols = this.userSymbols.get(userId) || new Set();
+      
+      // 새로운 구독 정보 가져오기
+      const userStocks = await this.getUserForeignStocks(userId);
+      const newSymbolSet = new Set(userStocks.map(stock => stock.key));
+      
+      // 사용자 구독 정보 업데이트
+      this.userSymbols.set(userId, newSymbolSet);
+      
+      // 새로 추가된 종목들 구독
+      const symbolsToAdd = [...newSymbolSet].filter(symbol => !this.subscribedSymbols.has(symbol));
+      if (symbolsToAdd.length > 0) {
+        await this.addSymbolSubscriptions(symbolsToAdd);
+        console.log(`📈 새 종목 구독 추가: ${symbolsToAdd.join(', ')}`);
+      }
+      
+      // 더 이상 구독하지 않는 종목들 정리
+      const removedSymbols = [...oldSymbols].filter(symbol => !newSymbolSet.has(symbol));
+      if (removedSymbols.length > 0) {
+        this.cleanupUnusedSubscriptions(new Set(removedSymbols));
+        console.log(`📉 구독 해제된 종목: ${removedSymbols.join(', ')}`);
+      }
+      
+      console.log(`✅ 사용자 ${userId} 관심종목 구독 업데이트 완료`);
+      
+    } catch (error) {
+      console.error(`❌ 사용자 ${userId} 관심종목 구독 업데이트 실패:`, error);
+    }
+  }
+
+  /**
    * 사용자의 해외주식 자산 조회
    */
   async getUserForeignStocks(userId) {
@@ -204,6 +242,8 @@ class WebSocketProxyService {
       console.log(`사용자 ${userId}의 해외주식 자산 개수: ${assets.length}`);
 
       const stocks = [];
+      
+      // 자산에서 종목 추출
       for (const asset of assets) {
         console.log(`자산 처리 중: ${asset.name}`, {
           details: asset.details,
@@ -243,6 +283,34 @@ class WebSocketProxyService {
             detailsKeys: details instanceof Map ? Array.from(details.keys()) : Object.keys(details || {})
           });
         }
+      }
+
+      // 관심종목도 추가
+      try {
+        const Watchlist = require('../models/Watchlist');
+        const watchlistItems = await Watchlist.find({ userId: userId });
+        console.log(`사용자 ${userId}의 관심종목 개수: ${watchlistItems.length}`);
+        
+        for (const item of watchlistItems) {
+          const exchangePrefix = this.getExchangePrefix(item.market);
+          const key = `${exchangePrefix}${item.ticker}`;
+          
+          // 중복 체크 (이미 자산으로 있는 종목은 제외)
+          const isDuplicate = stocks.some(stock => stock.key === key);
+          if (!isDuplicate) {
+            stocks.push({
+              key: key,
+              symbol: item.ticker,
+              name: item.englishName,
+              market: item.market
+            });
+            
+            console.log(`관심종목 추가: ${item.englishName} (${item.ticker}) -> ${key}`);
+          }
+        }
+      } catch (watchlistError) {
+        console.error(`사용자 ${userId} 관심종목 조회 실패:`, watchlistError);
+        // 관심종목 조회 실패해도 자산은 정상 처리
       }
 
       console.log(`최종 종목 목록:`, stocks);
@@ -555,4 +623,10 @@ class WebSocketProxyService {
   }
 }
 
-module.exports = new WebSocketProxyService(); 
+// 싱글톤 인스턴스 생성
+const webSocketProxyService = new WebSocketProxyService();
+
+// 인스턴스 접근을 위한 함수 추가
+webSocketProxyService.getInstance = () => webSocketProxyService;
+
+module.exports = webSocketProxyService; 
