@@ -5,7 +5,15 @@ const { calculateForeignStockReturns } = require('./koreaInvController');
 // 자산 목록 조회
 exports.getAssets = async (req, res) => {
   try {
-    const assets = await Asset.find({ userId: req.user.id });
+    const allAssets = await Asset.find({ userId: req.user.id });
+    
+    // 수량이 0인 주식/암호화폐 자산은 제외 (다른 자산은 그대로 유지)
+    const assets = allAssets.filter(asset => {
+      if (asset.mainCategory === 'STOCK' || asset.mainCategory === 'CRYPTO') {
+        return asset.totalQuantity > 0;
+      }
+      return true; // 주식/암호화폐가 아닌 경우는 그대로 포함
+    });
     
     // 메인 카테고리별로 자산 그룹화
     const groupedAssets = assets.reduce((acc, asset) => {
@@ -232,11 +240,21 @@ exports.addTransaction = async (req, res) => {
       asset.amount += transactionAmount;
       asset.totalQuantity += quantity;
     } else if (type.toUpperCase() === 'SELL') {
-      if (asset.amount < transactionAmount) {
-        return res.status(400).json({ message: '보유 금액보다 많은 금액을 매도할 수 없습니다.' });
-      }
-      asset.amount -= transactionAmount;
+      // 매도할 때는 평균 매수가 기준으로 해당 수량만큼의 원본 투자금액을 빼기
+      const averageCostPerShare = asset.amount / asset.totalQuantity;
+      const originalInvestment = quantity * averageCostPerShare;
+      
+      asset.amount -= originalInvestment;
       asset.totalQuantity -= quantity;
+      
+      // 수량이 0이 되면 자산을 완전히 삭제 (거래 기록도 함께)
+      if (asset.totalQuantity <= 0) {
+        await Asset.findByIdAndDelete(asset._id);
+        return res.json({
+          message: '모든 수량이 매도되어 자산이 삭제되었습니다.',
+          deleted: true
+        });
+      }
     }
 
     await asset.save();

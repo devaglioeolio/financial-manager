@@ -25,9 +25,14 @@
               <span class="stock-ticker">{{ item.ticker }}</span>
               <span class="stock-market">{{ getMarketName(item.market) }}</span>
             </div>
-            <button class="remove-btn" @click="removeFromWatchlist(item._id || item.id)" title="관심종목에서 제거">
-              ✕
-            </button>
+            <div class="item-actions">
+              <button class="add-asset-btn" @click="addToAsset(item)" title="자산으로 추가">
+                💰
+              </button>
+              <button class="remove-btn" @click="removeFromWatchlist(item._id || item.id)" title="관심종목에서 제거">
+                ✕
+              </button>
+            </div>
           </div>
 
           <div class="price-info">
@@ -62,6 +67,78 @@
               실시간
             </span>
             <span v-else class="static-indicator">정적 데이터</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 자산 추가 모달 -->
+    <div v-if="showAssetModal" class="modal-overlay" @click="closeAssetModal">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>자산으로 추가</h3>
+          <button class="modal-close" @click="closeAssetModal">✕</button>
+        </div>
+
+        <div class="asset-form">
+          <div class="stock-info-display">
+            <h4>{{ selectedStock?.englishName }}</h4>
+            <div class="stock-details">
+              <span class="ticker-display">{{ selectedStock?.ticker }}</span>
+              <span class="market-display">{{ getMarketName(selectedStock?.market) }}</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>수량</label>
+            <input 
+              v-model.number="assetForm.quantity" 
+              type="number" 
+              min="0"
+              step="0.001"
+              placeholder="보유 수량"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label>평균 매수가 (USD)</label>
+            <input 
+              v-model.number="assetForm.price" 
+              type="number" 
+              min="0"
+              step="0.01"
+              placeholder="평균 매수가"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label>환율</label>
+            <input 
+              v-model.number="assetForm.exchangeRate" 
+              type="number" 
+              min="0"
+              step="0.01"
+              placeholder="구매 당시 환율"
+              required
+            />
+          </div>
+
+          <div class="calculated-total">
+            총 투자금액: ₩{{ formatNumber((assetForm.quantity || 0) * (assetForm.price || 0) * (assetForm.exchangeRate || 0)) }}
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary" @click="closeAssetModal">취소</button>
+            <button 
+              type="button" 
+              class="btn btn-primary" 
+              @click="submitAsset"
+              :disabled="!isAssetFormValid"
+            >
+              자산 추가
+            </button>
           </div>
         </div>
       </div>
@@ -135,6 +212,15 @@ const searchResults = ref([])
 const searchLoading = ref(false)
 const loading = ref(false)
 
+// 자산 추가 관련
+const showAssetModal = ref(false)
+const selectedStock = ref(null)
+const assetForm = ref({
+  quantity: 0,
+  price: 0,
+  exchangeRate: 1300 // 기본 환율
+})
+
 // 검색 디바운스를 위한 타이머
 let searchTimer = null
 
@@ -200,6 +286,11 @@ const formatPrice = (price) => {
 const formatPercent = (percent) => {
   if (percent === null || percent === undefined || isNaN(percent)) return '0.00'
   return Math.abs(percent).toFixed(2)
+}
+
+const formatNumber = (num) => {
+  if (num === null || num === undefined || isNaN(num)) return '0'
+  return new Intl.NumberFormat('ko-KR').format(num)
 }
 
 // 종목 검색
@@ -295,7 +386,67 @@ const loadWatchlist = async () => {
   }
 }
 
-// 모달 닫기
+// 자산으로 추가
+const addToAsset = (stock) => {
+  selectedStock.value = stock
+  assetForm.value = {
+    quantity: 0,
+    price: stock.currentPrice || 0,
+    exchangeRate: 1300
+  }
+  showAssetModal.value = true
+}
+
+// 자산 폼 유효성 검사
+const isAssetFormValid = computed(() => {
+  return assetForm.value.quantity > 0 && 
+         assetForm.value.price > 0 && 
+         assetForm.value.exchangeRate > 0
+})
+
+// 자산 추가 제출
+const submitAsset = async () => {
+  if (!selectedStock.value || !isAssetFormValid.value) return
+
+  try {
+    const assetData = {
+      name: selectedStock.value.englishName,
+      mainCategory: 'STOCK',
+      subCategory: 'FOREIGN',
+      quantity: assetForm.value.quantity,
+      price: assetForm.value.price,
+      currency: 'USD',
+      exchangeRate: assetForm.value.exchangeRate,
+      details: {
+        ticker: selectedStock.value.ticker,
+        market: selectedStock.value.market
+      }
+    }
+
+    const response = await axios.post('/api/assets', assetData)
+    
+    if (response.data.message) {
+      alert('자산이 성공적으로 추가되었습니다!')
+      closeAssetModal()
+    }
+  } catch (error) {
+    console.error('자산 추가 실패:', error)
+    alert('자산 추가에 실패했습니다: ' + (error.response?.data?.message || error.message))
+  }
+}
+
+// 자산 모달 닫기
+const closeAssetModal = () => {
+  showAssetModal.value = false
+  selectedStock.value = null
+  assetForm.value = {
+    quantity: 0,
+    price: 0,
+    exchangeRate: 1300
+  }
+}
+
+// 검색 모달 닫기
 const closeModal = () => {
   showSearchModal.value = false
   searchQuery.value = ''
@@ -447,6 +598,27 @@ onMounted(() => {
 .stock-market {
   font-size: 0.8rem;
   opacity: 0.8;
+}
+
+.item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.add-asset-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s ease;
+}
+
+.add-asset-btn:hover {
+  background: rgba(100, 255, 100, 0.6);
 }
 
 .remove-btn {
@@ -714,5 +886,121 @@ onMounted(() => {
   font-size: 2rem;
   display: block;
   margin-bottom: 10px;
+}
+
+/* 자산 추가 모달 */
+.asset-form {
+  padding: 20px;
+}
+
+.stock-info-display {
+  background: #f8fafc;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.stock-info-display h4 {
+  margin: 0 0 8px 0;
+  color: #1f2937;
+  font-size: 1.1rem;
+}
+
+.stock-details {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.ticker-display {
+  background: #3b82f6;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.market-display {
+  background: #6b7280;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.asset-form .form-group {
+  margin-bottom: 15px;
+}
+
+.asset-form .form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.asset-form .form-group input {
+  width: 100%;
+  padding: 10px;
+  border: 2px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 1rem;
+  transition: border-color 0.2s ease;
+}
+
+.asset-form .form-group input:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.calculated-total {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 10px;
+  border-radius: 6px;
+  text-align: center;
+  font-weight: 600;
+  color: #1d4ed8;
+  margin-bottom: 20px;
+}
+
+.asset-form .form-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.asset-form .btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.asset-form .btn-secondary {
+  background: #6b7280;
+  color: white;
+}
+
+.asset-form .btn-secondary:hover {
+  background: #4b5563;
+}
+
+.asset-form .btn-primary {
+  background: #3b82f6;
+  color: white;
+}
+
+.asset-form .btn-primary:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.asset-form .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style> 

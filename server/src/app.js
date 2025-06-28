@@ -10,8 +10,10 @@ const assetSnapshotRoutes = require('./routes/assetSnapshots');
 const koreaInvRoutes = require('./routes/koreaInv');
 const stockCodeRoutes = require('./routes/stockCodes');
 const watchlistRoutes = require('./routes/watchlist');
+const notificationRoutes = require('./routes/notifications');
 const { startExchangeRateScheduler } = require('./schedulers/exchangeRateScheduler');
 const { startDailySnapshotScheduler } = require('./schedulers/dailySnapshotScheduler');
+const { startAllNotificationSchedulers } = require('./schedulers/notificationScheduler');
 const { createMissingSnapshotsForAllUsers } = require('./services/dailySnapshotService');
 const tokenManager = require('./services/koreaInvestmentToken');
 const websocketProxy = require('./services/websocketProxy');
@@ -40,6 +42,7 @@ app.use('/api/asset-snapshots', assetSnapshotRoutes);
 app.use('/api/korea-inv', koreaInvRoutes);
 app.use('/api/stock-codes', stockCodeRoutes);
 app.use('/api/watchlist', watchlistRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // 기본 라우트 핸들러
 app.get('/', (req, res) => {
@@ -73,6 +76,9 @@ mongoose.connect(process.env.MONGO_URI, {
   
   // 일별 자산 스냅샷 스케줄러 시작
   await startDailySnapshotScheduler();
+  
+  // 알림 시스템 스케줄러 시작
+  startAllNotificationSchedulers();
   
   // 한국투자증권 토큰 초기화 (10초 지연)
   tokenManager.initializeTokens();

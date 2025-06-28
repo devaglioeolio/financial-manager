@@ -2,7 +2,14 @@
   <div class="dashboard">
     <div class="dashboard-header">
       <div class="header-main">
-        <h1>자산 현황</h1>
+        <div class="header-left">
+          <h1>자산 현황</h1>
+        </div>
+        <div class="header-right">
+          <NotificationCenter ref="notificationCenter" />
+        </div>
+      </div>
+      <div class="total-assets-section">
         <div class="total-assets">
           <h2>총 자산</h2>
           <p class="amount">₩{{ formatNumberInt(calculatedTotalAmount) }}</p>
@@ -360,6 +367,30 @@
                 </div>
               </div>
 
+              <!-- 해외주식인 경우 티커와 마켓 정보 -->
+              <div v-if="newAsset.subCategory === 'FOREIGN' && newAsset.mainCategory === 'STOCK'" class="stock-details">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>티커</label>
+                    <input 
+                      v-model="newAsset.ticker" 
+                      type="text" 
+                      placeholder="예: AAPL, MSFT"
+                      required
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label>거래소</label>
+                    <select v-model="newAsset.market" required>
+                      <option value="">선택하세요</option>
+                      <option value="NAS">NASDAQ</option>
+                      <option value="NYS">NYSE</option>
+                      <option value="AMS">AMEX</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               <!-- 외화 자산인 경우 -->
               <div v-if="newAsset.subCategory === 'FOREIGN'" class="currency-inputs">
                 <div class="form-group">
@@ -576,6 +607,7 @@ import ExchangeRateWidget from '../components/ExchangeRateWidget.vue'
 import KISRealTimeWidget from '../components/KISRealTimeWidget.vue'
 import ForeignStockWidget from '../components/ForeignStockWidget.vue'
 import WatchlistWidget from '../components/WatchlistWidget.vue'
+import NotificationCenter from '../components/NotificationCenter.vue'
 import { useWebSocketStockData } from '../composables/useWebSocketStockData.js'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement)
@@ -622,7 +654,9 @@ const newAsset = ref({
   quantity: 0,
   price: 0,
   currency: 'KRW',
-  exchangeRate: 1
+  exchangeRate: 1,
+  ticker: '',
+  market: ''
 })
 
 // 거래 추가 폼
@@ -1158,7 +1192,9 @@ const resetAssetForm = () => {
     quantity: 0,
     price: 0,
     currency: 'KRW',
-    exchangeRate: 1
+    exchangeRate: 1,
+    ticker: '',
+    market: ''
   }
 }
 
@@ -1166,6 +1202,8 @@ const selectMainCategory = (categoryKey) => {
   newAsset.value.mainCategory = categoryKey
   newAsset.value.subCategory = '' // 서브카테고리 초기화
   newAsset.value.currency = 'KRW' // 통화 초기화
+  newAsset.value.ticker = '' // 티커 초기화
+  newAsset.value.market = '' // 마켓 초기화
 }
 
 const nextStep = () => {
@@ -1210,7 +1248,16 @@ const addAsset = async () => {
       mainCategory: newAsset.value.mainCategory,
       subCategory: newAsset.value.subCategory,
       currency: newAsset.value.currency,
-      exchangeRate: newAsset.value.exchangeRate
+      exchangeRate: newAsset.value.exchangeRate,
+      details: {}
+    }
+
+    // 해외주식인 경우 ticker와 market 정보 추가
+    if (newAsset.value.mainCategory === 'STOCK' && newAsset.value.subCategory === 'FOREIGN') {
+      assetData.details = {
+        ticker: newAsset.value.ticker,
+        market: newAsset.value.market
+      }
     }
 
     // 주식/암호화폐인 경우
@@ -1327,6 +1374,13 @@ const isFormValid = computed(() => {
     return false
   }
 
+  // 해외주식인 경우 ticker와 market 필수
+  if (newAsset.value.mainCategory === 'STOCK' && newAsset.value.subCategory === 'FOREIGN') {
+    if (!newAsset.value.ticker || !newAsset.value.market) {
+      return false
+    }
+  }
+
   if (isStockOrCrypto(newAsset.value.mainCategory)) {
     return newAsset.value.quantity > 0 && newAsset.value.price > 0
   } else {
@@ -1424,6 +1478,26 @@ onMounted(async () => {
 }
 
 .header-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.header-left h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #333;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.total-assets-section {
   width: 100%;
 }
 
