@@ -1,10 +1,20 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
-import TheWelcome from './components/TheWelcome.vue'
+import { onMounted } from 'vue'
+// @ts-ignore
+import ToastContainer from './components/ToastContainer.vue'
+// @ts-ignore
+import LoadingIndicator from './components/LoadingIndicator.vue'
+
+// 앱이 시작될 때 초기화 작업
+onMounted(() => {
+  console.log('Finance Manager 앱이 시작되었습니다.')
+})
 </script>
 
 <template>
   <router-view></router-view>
+  <ToastContainer />
+  <LoadingIndicator />
 </template>
 
 <style>

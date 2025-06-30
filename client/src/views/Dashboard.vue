@@ -609,6 +609,8 @@ import ForeignStockWidget from '../components/ForeignStockWidget.vue'
 import WatchlistWidget from '../components/WatchlistWidget.vue'
 import NotificationCenter from '../components/NotificationCenter.vue'
 import { useWebSocketStockData } from '../composables/useWebSocketStockData.js'
+import { useToast } from '../composables/useToast'
+import { useLoading } from '../composables/useLoading'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement)
 
@@ -624,6 +626,12 @@ const {
   getStockPrice,
   getAllStockPrices
 } = useWebSocketStockData()
+
+// Toast 알림 시스템
+const { showSuccess, showError, showWarning, showInfo } = useToast()
+
+// 로딩 상태 관리
+const { setLoading, withLoading } = useLoading()
 
 const totalAmount = ref(0)
 const categories = ref([])
@@ -942,161 +950,175 @@ const calculatedTotalAmount = computed(() => {
 })
 
 const fetchAssets = async () => {
-  try {
-    const response = await axios.get('/api/assets')
-    const { totalAmount: total, categories: cats } = response.data
-    
-    totalAmount.value = total
-    categories.value = cats
+  await withLoading('fetch-assets', async () => {
+    try {
+      const response = await axios.get('/api/assets')
+      const { totalAmount: total, categories: cats } = response.data
+      
+      totalAmount.value = total
+      categories.value = cats
 
-    // 파이 차트 데이터: 서브카테고리 기준
-    const subCats = []
-    cats.forEach(cat => {
-      cat.subCategories.forEach(sub => {
-        subCats.push(sub)
+      // 파이 차트 데이터: 서브카테고리 기준
+      const subCats = []
+      cats.forEach(cat => {
+        cat.subCategories.forEach(sub => {
+          subCats.push(sub)
+        })
       })
-    })
-    pieChartData.value = {
-      labels: subCats.map(sub => sub.categoryName),
-      datasets: [{
-        data: subCats.map(sub => sub.totalAmount),
-        backgroundColor: ['#4CAF50', '#2196F3', '#FFC107', '#9C27B0', '#E91E63', '#00BCD4', '#FF5722', '#795548']
-      }]
+      pieChartData.value = {
+        labels: subCats.map(sub => sub.categoryName),
+        datasets: [{
+          data: subCats.map(sub => sub.totalAmount),
+          backgroundColor: ['#4CAF50', '#2196F3', '#FFC107', '#9C27B0', '#E91E63', '#00BCD4', '#FF5722', '#795548']
+        }]
+      }
+    } catch (error) {
+      console.error('자산 데이터 조회 실패:', error)
+      showError('자산 데이터를 불러오는데 실패했습니다.')
     }
-  } catch (error) {
-    console.error('자산 데이터 조회 실패:', error)
-  }
+  })
 }
 
 // 실시간 데이터 가져오기
 const fetchRealTimeData = async () => {
-  realTimeDataLoading.value = true
-  try {
-    // 환율과 해외주식 데이터를 병렬로 가져오기
-    const [exchangeRatesResponse, stockReturnsResponse] = await Promise.all([
-      axios.get('/api/assets/exchange-rates').catch(err => {
-        console.warn('환율 정보 조회 실패:', err.message)
-        return { data: { success: false, data: [] } }
-      }),
-      axios.get('/api/assets/foreign-stock-returns').catch(err => {
-        console.warn('해외주식 정보 조회 실패:', err.message)
-        return { data: { success: false, data: [] } }
-      })
-    ])
+  await withLoading('fetch-stock-data', async () => {
+    realTimeDataLoading.value = true
+    try {
+      // 환율과 해외주식 데이터를 병렬로 가져오기
+      const [exchangeRatesResponse, stockReturnsResponse] = await Promise.all([
+        axios.get('/api/assets/exchange-rates').catch(err => {
+          console.warn('환율 정보 조회 실패:', err.message)
+          return { data: { success: false, data: [] } }
+        }),
+        axios.get('/api/assets/foreign-stock-returns').catch(err => {
+          console.warn('해외주식 정보 조회 실패:', err.message)
+          return { data: { success: false, data: [] } }
+        })
+      ])
 
-    // 환율 데이터 처리
-    if (exchangeRatesResponse.data.success) {
-      const exchangeRateMap = {}
-      exchangeRatesResponse.data.data.forEach(rate => {
-        exchangeRateMap[rate.currency] = rate.rate
-        realTimeExchangeRatesForWidget.value[rate.currency] = rate
-      })
-      realTimeExchangeRates.value = exchangeRateMap
+      // 환율 데이터 처리
+      if (exchangeRatesResponse.data.success) {
+        const exchangeRateMap = {}
+        exchangeRatesResponse.data.data.forEach(rate => {
+          exchangeRateMap[rate.currency] = rate.rate
+          realTimeExchangeRatesForWidget.value[rate.currency] = rate
+        })
+        realTimeExchangeRates.value = exchangeRateMap
+      }
+
+      // 해외주식 데이터 처리
+      if (stockReturnsResponse.data.success) {
+        const stockDataMap = {}
+        stockReturnsResponse.data.data.forEach(stock => {
+          if (!stock.error) {
+            stockDataMap[stock.assetId] = stock
+          }
+        })
+        realTimeStockData.value = stockDataMap
+      }
+
+      // 실시간 데이터가 있으면 플래그 설정
+      hasRealTimeData.value = Object.keys(realTimeStockData.value).length > 0
+
+    } catch (error) {
+      console.error('실시간 데이터 조회 실패:', error)
+      hasRealTimeData.value = false
+      showWarning('일부 실시간 데이터를 불러오는데 실패했습니다.')
+    } finally {
+      realTimeDataLoading.value = false
     }
-
-    // 해외주식 데이터 처리
-    if (stockReturnsResponse.data.success) {
-      const stockDataMap = {}
-      stockReturnsResponse.data.data.forEach(stock => {
-        if (!stock.error) {
-          stockDataMap[stock.assetId] = stock
-        }
-      })
-      realTimeStockData.value = stockDataMap
-    }
-
-    // 실시간 데이터가 있으면 플래그 설정
-    hasRealTimeData.value = Object.keys(realTimeStockData.value).length > 0
-
-  } catch (error) {
-    console.error('실시간 데이터 조회 실패:', error)
-    hasRealTimeData.value = false
-  } finally {
-    realTimeDataLoading.value = false
-  }
+  })
 }
 
 const fetchMonthlyAssets = async () => {
-  try {
-    const response = await axios.get('/api/assets/monthly')
-    const { monthlyData } = response.data
-    
-    monthlyChartData.value = {
-      labels: monthlyData.map(data => data.monthName),
-      datasets: [{
-        label: '총 자산',
-        data: monthlyData.map(data => data.totalAmount),
-        borderColor: '#2196F3',
-        backgroundColor: 'rgba(33, 150, 243, 0.1)',
-        tension: 0.4,
-        fill: true
-      }]
+  await withLoading('fetch-monthly-data', async () => {
+    try {
+      const response = await axios.get('/api/assets/monthly')
+      const { monthlyData } = response.data
+      
+      monthlyChartData.value = {
+        labels: monthlyData.map(data => data.monthName),
+        datasets: [{
+          label: '총 자산',
+          data: monthlyData.map(data => data.totalAmount),
+          borderColor: '#2196F3',
+          backgroundColor: 'rgba(33, 150, 243, 0.1)',
+          tension: 0.4,
+          fill: true
+        }]
+      }
+    } catch (error) {
+      console.error('월별 자산 데이터 조회 실패:', error)
+      showError('월별 자산 데이터를 불러오는데 실패했습니다.')
     }
-  } catch (error) {
-    console.error('월별 자산 데이터 조회 실패:', error)
-  }
+  })
 }
 
 const fetchDailyAssets = async () => {
-  try {
-    const response = await axios.get(`/api/asset-snapshots/daily-changes?days=${selectedDays.value}`)
-    const { data: dailyData } = response.data
-    
-    // 서버에서 받은 과거 데이터
-    const formattedData = dailyData.map(item => {
-      const date = new Date(item.date);
-      const month = date.getMonth() + 1;
-      const day = date.getDate();
-      const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
-      const weekday = weekdays[date.getDay()];
+  await withLoading('fetch-daily-data', async () => {
+    try {
+      const response = await axios.get(`/api/asset-snapshots/daily-changes?days=${selectedDays.value}`)
+      const { data: dailyData } = response.data
       
-      return {
-        ...item,
-        dateDisplay: `${month}/${day}(${weekday})`
-      };
-    });
+      // 서버에서 받은 과거 데이터
+      const formattedData = dailyData.map(item => {
+        const date = new Date(item.date);
+        const month = date.getMonth() + 1;
+        const day = date.getDate();
+        const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+        const weekday = weekdays[date.getDay()];
+        
+        return {
+          ...item,
+          dateDisplay: `${month}/${day}(${weekday})`
+        };
+      });
 
-    // 오늘 데이터를 클라이언트에서 계산해서 추가
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    const month = today.getMonth() + 1;
-    const day = today.getDate();
-    const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
-    const weekday = weekdays[today.getDay()];
-    
-    const todayData = {
-      date: todayStr,
-      totalAmount: calculatedTotalAmount.value, // 실시간 데이터가 반영된 총 자산
-      dateDisplay: `${month}/${day}(${weekday})`,
-      isRealTime: true
-    };
-    
-    // 오늘 데이터를 배열에 추가
-    formattedData.push(todayData);
-    
-    dailyChartData.value = {
-      labels: formattedData.map(data => data.dateDisplay),
-      datasets: [{
-        label: '총 자산',
-        data: formattedData.map(data => data.totalAmount),
-        borderColor: '#4CAF50',
-        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-        tension: 0.4,
-        fill: true
-      }]
-    };
-  } catch (error) {
-    console.error('일별 자산 데이터 조회 실패:', error);
-  }
+      // 오늘 데이터를 클라이언트에서 계산해서 추가
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      const month = today.getMonth() + 1;
+      const day = today.getDate();
+      const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+      const weekday = weekdays[today.getDay()];
+      
+      const todayData = {
+        date: todayStr,
+        totalAmount: calculatedTotalAmount.value, // 실시간 데이터가 반영된 총 자산
+        dateDisplay: `${month}/${day}(${weekday})`,
+        isRealTime: true
+      };
+      
+      // 오늘 데이터를 배열에 추가
+      formattedData.push(todayData);
+      
+      dailyChartData.value = {
+        labels: formattedData.map(data => data.dateDisplay),
+        datasets: [{
+          label: '총 자산',
+          data: formattedData.map(data => data.totalAmount),
+          borderColor: '#4CAF50',
+          backgroundColor: 'rgba(76, 175, 80, 0.1)',
+          tension: 0.4,
+          fill: true
+        }]
+      };
+    } catch (error) {
+      console.error('일별 자산 데이터 조회 실패:', error);
+      showError('일별 자산 데이터를 불러오는데 실패했습니다.')
+    }
+  })
 }
 
 const fetchRecentTransactions = async () => {
+  // 거래 내역은 silent loading으로 처리 (UI 방해하지 않도록)
   try {
     const response = await axios.get('/api/assets/transactions/recent?limit=15')
     const { transactions } = response.data
     recentTransactions.value = transactions
   } catch (error) {
     console.error('최근 거래 내역 조회 실패:', error)
+    showWarning('최근 거래 내역을 불러오는데 실패했습니다.')
   }
 }
 
@@ -1104,29 +1126,31 @@ const fetchRecentTransactions = async () => {
 const backfillMissingSnapshots = async () => {
   if (backfillLoading.value) return
   
-  backfillLoading.value = true
-  try {
-    console.log('누락된 스냅샷 백필 시작...')
-    
-    const response = await axios.post('/api/asset-snapshots/backfill', {
-      days: 14 // 최근 14일 체크
-    })
-    
-    if (response.data.success) {
-      const result = response.data.data
-      const message = `백필 완료! 생성: ${result.created}개, 건너뜀: ${result.skipped}개, 오류: ${result.errors}개`
-      alert(message)
-      console.log('백필 결과:', result)
+  await withLoading('backup-data', async () => {
+    backfillLoading.value = true
+    try {
+      console.log('누락된 스냅샷 백필 시작...')
       
-      // 백필 후 차트 데이터 새로고침
-      await fetchDailyAssets()
+      const response = await axios.post('/api/asset-snapshots/backfill', {
+        days: 14 // 최근 14일 체크
+      })
+      
+      if (response.data.success) {
+        const result = response.data.data
+        const message = `백필 완료! 생성: ${result.created}개, 건너뜀: ${result.skipped}개, 오류: ${result.errors}개`
+        showSuccess(message)
+        console.log('백필 결과:', result)
+        
+        // 백필 후 차트 데이터 새로고침
+        await fetchDailyAssets()
+      }
+    } catch (error) {
+      console.error('누락된 스냅샷 백필 실패:', error)
+      showError('누락된 스냅샷 백필에 실패했습니다: ' + (error.response?.data?.message || error.message))
+    } finally {
+      backfillLoading.value = false
     }
-  } catch (error) {
-    console.error('누락된 스냅샷 백필 실패:', error)
-    alert('누락된 스냅샷 백필에 실패했습니다: ' + (error.response?.data?.message || error.message))
-  } finally {
-    backfillLoading.value = false
-  }
+  })
 }
 
 const formatTransactionDate = (date) => {
@@ -1202,6 +1226,7 @@ const selectMainCategory = (categoryKey) => {
   newAsset.value.mainCategory = categoryKey
   newAsset.value.subCategory = '' // 서브카테고리 초기화
   newAsset.value.currency = 'KRW' // 통화 초기화
+  newAsset.value.exchangeRate = 1 // 환율 초기화
   newAsset.value.ticker = '' // 티커 초기화
   newAsset.value.market = '' // 마켓 초기화
 }
@@ -1242,46 +1267,50 @@ const isStockOrCrypto = (mainCategory) => {
 
 // 자산 추가 API 호출
 const addAsset = async () => {
-  try {
-    const assetData = {
-      name: newAsset.value.name,
-      mainCategory: newAsset.value.mainCategory,
-      subCategory: newAsset.value.subCategory,
-      currency: newAsset.value.currency,
-      exchangeRate: newAsset.value.exchangeRate,
-      details: {}
-    }
-
-    // 해외주식인 경우 ticker와 market 정보 추가
-    if (newAsset.value.mainCategory === 'STOCK' && newAsset.value.subCategory === 'FOREIGN') {
-      assetData.details = {
-        ticker: newAsset.value.ticker,
-        market: newAsset.value.market
+  await withLoading('add-asset', async () => {
+    try {
+      const assetData = {
+        name: newAsset.value.name,
+        mainCategory: newAsset.value.mainCategory,
+        subCategory: newAsset.value.subCategory,
+        currency: newAsset.value.currency,
+        exchangeRate: newAsset.value.exchangeRate,
+        details: {}
       }
-    }
 
-    // 주식/암호화폐인 경우
-    if (isStockOrCrypto(newAsset.value.mainCategory)) {
-      assetData.quantity = newAsset.value.quantity
-      assetData.price = newAsset.value.price
-    } else {
-      assetData.amount = newAsset.value.amount
-    }
+      // 해외주식인 경우 ticker와 market 정보 추가
+      if (newAsset.value.mainCategory === 'STOCK' && newAsset.value.subCategory === 'FOREIGN') {
+        assetData.details = {
+          ticker: newAsset.value.ticker,
+          market: newAsset.value.market
+        }
+      }
 
-    await axios.post('/api/assets', assetData)
-    
-    // 성공 시 데이터 새로고침
-    await fetchAssets()
-    await fetchMonthlyAssets()
-    await fetchDailyAssets()
-    await fetchRecentTransactions()
-    
-    closeModals()
-    alert('자산이 성공적으로 추가되었습니다!')
-  } catch (error) {
-    console.error('자산 추가 실패:', error)
-    alert('자산 추가에 실패했습니다: ' + (error.response?.data?.message || error.message))
-  }
+      // 주식/암호화폐인 경우
+      if (isStockOrCrypto(newAsset.value.mainCategory)) {
+        assetData.quantity = newAsset.value.quantity
+        assetData.price = newAsset.value.price
+      } else {
+        assetData.amount = newAsset.value.amount
+      }
+
+      await axios.post('/api/assets', assetData)
+      
+      // 성공 시 데이터 새로고침
+      await Promise.all([
+        fetchAssets(),
+        fetchMonthlyAssets(),
+        fetchDailyAssets(),
+        fetchRecentTransactions()
+      ])
+      
+      closeModals()
+      showSuccess('자산이 성공적으로 추가되었습니다!')
+    } catch (error) {
+      console.error('자산 추가 실패:', error)
+      showError('자산 추가에 실패했습니다: ' + (error.response?.data?.message || error.message))
+    }
+  })
 }
 
 // 거래 추가 관련 메서드
@@ -1311,32 +1340,36 @@ const onAssetSelect = () => {
 
 // 거래 추가 API 호출
 const addTransaction = async () => {
-  try {
-    const transactionData = {
-      type: newTransaction.value.type,
-      quantity: newTransaction.value.quantity,
-      price: newTransaction.value.price
-    }
+  await withLoading('add-transaction', async () => {
+    try {
+      const transactionData = {
+        type: newTransaction.value.type,
+        quantity: newTransaction.value.quantity,
+        price: newTransaction.value.price
+      }
 
-    // 외화 자산인 경우 환율 추가
-    if (selectedAsset.value?.currency !== 'KRW') {
-      transactionData.exchangeRate = newTransaction.value.exchangeRate
-    }
+      // 외화 자산인 경우 환율 추가
+      if (selectedAsset.value?.currency !== 'KRW') {
+        transactionData.exchangeRate = newTransaction.value.exchangeRate
+      }
 
-    await axios.post(`/api/assets/${newTransaction.value.assetId}/transactions`, transactionData)
-    
-    // 성공 시 데이터 새로고침
-    await fetchAssets()
-    await fetchMonthlyAssets()
-    await fetchDailyAssets()
-    await fetchRecentTransactions()
-    
-    closeModals()
-    alert('거래가 성공적으로 추가되었습니다!')
-  } catch (error) {
-    console.error('거래 추가 실패:', error)
-    alert('거래 추가에 실패했습니다: ' + (error.response?.data?.message || error.message))
-  }
+      await axios.post(`/api/assets/${newTransaction.value.assetId}/transactions`, transactionData)
+      
+      // 성공 시 데이터 새로고침
+      await Promise.all([
+        fetchAssets(),
+        fetchMonthlyAssets(),
+        fetchDailyAssets(),
+        fetchRecentTransactions()
+      ])
+      
+      closeModals()
+      showSuccess('거래가 성공적으로 추가되었습니다!')
+    } catch (error) {
+      console.error('거래 추가 실패:', error)
+      showError('거래 추가에 실패했습니다: ' + (error.response?.data?.message || error.message))
+    }
+  })
 }
 
 // 자산 삭제 관련 메서드
@@ -1351,21 +1384,25 @@ const deleteAsset = async () => {
     return
   }
 
-  try {
-    await axios.delete(`/api/assets/${assetToDelete.value}`)
-    
-    // 성공 시 데이터 새로고침
-    await fetchAssets()
-    await fetchMonthlyAssets()
-    await fetchDailyAssets()
-    await fetchRecentTransactions()
-    
-    closeModals()
-    alert('자산이 성공적으로 삭제되었습니다!')
-  } catch (error) {
-    console.error('자산 삭제 실패:', error)
-    alert('자산 삭제에 실패했습니다: ' + (error.response?.data?.message || error.message))
-  }
+  await withLoading('delete-asset', async () => {
+    try {
+      await axios.delete(`/api/assets/${assetToDelete.value}`)
+      
+      // 성공 시 데이터 새로고침
+      await Promise.all([
+        fetchAssets(),
+        fetchMonthlyAssets(),
+        fetchDailyAssets(),
+        fetchRecentTransactions()
+      ])
+      
+      closeModals()
+      showSuccess('자산이 성공적으로 삭제되었습니다!')
+    } catch (error) {
+      console.error('자산 삭제 실패:', error)
+      showError('자산 삭제에 실패했습니다: ' + (error.response?.data?.message || error.message))
+    }
+  })
 }
 
 // Computed properties
@@ -1465,6 +1502,26 @@ onMounted(async () => {
   
   // 5초 후 디버깅 정보 출력
   setTimeout(debugWebSocketData, 5000)
+})
+
+// 통화 선택 시 환율 자동 업데이트
+watch(() => newAsset.value.currency, (newCurrency) => {
+  if (newCurrency !== 'KRW' && realTimeExchangeRates.value[newCurrency]) {
+    newAsset.value.exchangeRate = realTimeExchangeRates.value[newCurrency]
+  } else if (newCurrency === 'KRW') {
+    newAsset.value.exchangeRate = 1
+  }
+})
+
+// 해외 자산 선택 시 USD로 통화 자동 설정
+watch(() => newAsset.value.subCategory, (newSubCategory) => {
+  if (newSubCategory === 'FOREIGN') {
+    newAsset.value.currency = 'USD'
+    // 환율도 자동으로 업데이트됨 (위의 currency watch에 의해)
+  } else {
+    newAsset.value.currency = 'KRW'
+    newAsset.value.exchangeRate = 1
+  }
 })
 </script>
 
