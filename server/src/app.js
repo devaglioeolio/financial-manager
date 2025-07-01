@@ -11,6 +11,7 @@ const koreaInvRoutes = require('./routes/koreaInv');
 const stockCodeRoutes = require('./routes/stockCodes');
 const watchlistRoutes = require('./routes/watchlist');
 const notificationRoutes = require('./routes/notifications');
+const trendsRoutes = require('./routes/trends');
 const { startExchangeRateScheduler } = require('./schedulers/exchangeRateScheduler');
 const { startDailySnapshotScheduler } = require('./schedulers/dailySnapshotScheduler');
 const { startAllNotificationSchedulers } = require('./schedulers/notificationScheduler');
@@ -43,10 +44,25 @@ app.use('/api/korea-inv', koreaInvRoutes);
 app.use('/api/stock-codes', stockCodeRoutes);
 app.use('/api/watchlist', watchlistRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/trends', trendsRoutes);
 
 // 기본 라우트 핸들러
 app.get('/', (req, res) => {
   res.send('Finance Manager 서버가 실행 중입니다!');
+});
+
+// API 상태 확인 엔드포인트
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    message: 'API 서버가 정상 작동 중입니다.',
+    timestamp: new Date().toISOString(),
+    routes: {
+      trends: '/api/trends',
+      assets: '/api/assets',
+      auth: '/api/auth'
+    }
+  });
 });
 
 // 404 핸들러
