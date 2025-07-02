@@ -4,6 +4,8 @@ import { onMounted } from 'vue'
 import ToastContainer from './components/ToastContainer.vue'
 // @ts-ignore
 import LoadingIndicator from './components/LoadingIndicator.vue'
+// @ts-ignore
+import Navbar from './components/Navbar.vue'
 
 // 앱이 시작될 때 초기화 작업
 onMounted(() => {
@@ -12,7 +14,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <router-view></router-view>
+  <div id="app">
+    <Navbar />
+    <main class="main-content">
+      <router-view></router-view>
+    </main>
+  </div>
   <ToastContainer />
   <LoadingIndicator />
 </template>
@@ -39,6 +46,14 @@ body {
   color: var(--text-color);
   background-color: var(--background-color);
   min-height: 100vh;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.main-content {
+  padding-top: 60px; /* Navbar 높이만큼 여백 추가 */
 }
 </style>
  
