@@ -30,6 +30,24 @@ module.exports = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('인증 에러:', error);
+    
+    // JWT 토큰 만료 에러 처리
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ 
+        message: '토큰이 만료되었습니다. 다시 로그인해주세요.',
+        code: 'TOKEN_EXPIRED'
+      });
+    }
+    
+    // JWT 토큰 형식 에러 처리
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ 
+        message: '유효하지 않은 토큰입니다.',
+        code: 'INVALID_TOKEN'
+      });
+    }
+    
+    // 기타 에러
     res.status(401).json({ message: '인증에 실패했습니다.' });
   }
 }; 
