@@ -98,6 +98,11 @@
         <WatchlistWidget />
       </div>
       
+      <!-- RS 리더 위젯 -->
+      <div class="chart-container rs-leader-container">
+        <RSLeaderWidget />
+      </div>
+      
       <div class="chart-container asset-detail-container">
         <div class="detail-header">
           <div class="detail-tabs">
@@ -607,6 +612,7 @@ import ExchangeRateWidget from '../components/ExchangeRateWidget.vue'
 import KISRealTimeWidget from '../components/KISRealTimeWidget.vue'
 import ForeignStockWidget from '../components/ForeignStockWidget.vue'
 import WatchlistWidget from '../components/WatchlistWidget.vue'
+import RSLeaderWidget from '../components/RSLeaderWidget.vue'
 import NotificationCenter from '../components/NotificationCenter.vue'
 import { useWebSocketStockData } from '../composables/useWebSocketStockData.js'
 import { useToast } from '../composables/useToast'

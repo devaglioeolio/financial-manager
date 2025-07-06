@@ -11,12 +11,15 @@ const koreaInvRoutes = require('./routes/koreaInv');
 const stockCodeRoutes = require('./routes/stockCodes');
 const watchlistRoutes = require('./routes/watchlist');
 const notificationRoutes = require('./routes/notifications');
+const rsLeaderRoutes = require('./routes/rsLeaders');
+const simpleRSRoutes = require('./routes/simpleRS');
 const { startExchangeRateScheduler } = require('./schedulers/exchangeRateScheduler');
 const { startDailySnapshotScheduler } = require('./schedulers/dailySnapshotScheduler');
 const { startAllNotificationSchedulers } = require('./schedulers/notificationScheduler');
 const { createMissingSnapshotsForAllUsers } = require('./services/dailySnapshotService');
 const tokenManager = require('./services/koreaInvestmentToken');
 const websocketProxy = require('./services/websocketProxy');
+const simpleRSService = require('./services/simpleRSService');
 
 // 환경변수 설정
 dotenv.config();
@@ -43,6 +46,8 @@ app.use('/api/korea-inv', koreaInvRoutes);
 app.use('/api/stock-codes', stockCodeRoutes);
 app.use('/api/watchlist', watchlistRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/rs-leaders', rsLeaderRoutes);
+app.use('/api/simple-rs', simpleRSRoutes);
 
 // 기본 라우트 핸들러
 app.get('/', (req, res) => {
@@ -99,6 +104,9 @@ mongoose.connect(process.env.MONGO_URI, {
   // WebSocket 프록시 서버 시작
   websocketProxy.startProxyServer(8080);
   console.log('WebSocket 프록시 서버가 8080 포트에서 시작되었습니다.');
+  
+  // Simple RS 서비스 초기화
+  simpleRSService.initialize();
   
   // 서버 시작 시 누락된 스냅샷들을 백필 (최근 7일)
   setTimeout(async () => {

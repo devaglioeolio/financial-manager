@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const tokenManager = require('./koreaInvestmentToken');
+const relativeStrengthService = require('./relativeStrengthService');
 
 class WebSocketProxyService {
   constructor() {
@@ -477,6 +478,12 @@ class WebSocketProxyService {
       if (parsedData) {
         // 해당 종목을 구독하는 모든 사용자에게 전송
         this.broadcastToInterestedUsers(parsedData);
+        
+        // RS 계산을 위한 실시간 데이터 저장
+        relativeStrengthService.saveRealTimeData(parsedData)
+          .catch(error => {
+            console.error('실시간 데이터 저장 오류:', error);
+          });
       }
 
     } catch (error) {
