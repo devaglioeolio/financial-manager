@@ -53,6 +53,10 @@ const stockPriceHistorySchema = new mongoose.Schema({
     type: Map,
     of: Number,
     default: {}
+  },
+  benchmarkUsed: {
+    type: String,
+    default: null // RS 계산에 사용된 벤치마크 지수 (SPY, QQQ 등)
   }
 }, {
   timestamps: true

@@ -1,10 +1,10 @@
 const StockPriceHistory = require('../models/StockPriceHistory');
+const indexDataService = require('./indexDataService');
 const cron = require('node-cron');
 
 class RelativeStrengthService {
   constructor() {
     this.isCalculating = false;
-    this.marketIndices = new Map(); // 시장 지수 저장
     this.setupScheduler();
   }
 
@@ -47,7 +47,7 @@ class RelativeStrengthService {
   }
 
   /**
-   * 특정 시장의 RS 계산
+   * 특정 시장의 RS 계산 (실제 시장 지수 사용)
    */
   async calculateMarketRS(market) {
     const today = new Date();
@@ -64,23 +64,29 @@ class RelativeStrengthService {
     // 종목별로 그룹화
     const groupedBySymbol = this.groupBySymbol(stockData);
     
-    // 시장 지수 계산 (평균 성과)
-    const marketPerformance = this.calculateMarketPerformance(groupedBySymbol);
+    // 실제 시장 지수 성과 가져오기
+    const marketPerformances = await this.getMarketBenchmarkPerformances(market);
     
+    if (!marketPerformances) {
+      console.log(`${market} 시장의 벤치마크 지수 데이터가 없습니다.`);
+      return;
+    }
+
     // 각 종목의 RS 계산
     const rsResults = [];
     
     for (const [symbol, prices] of Object.entries(groupedBySymbol)) {
       if (prices.length < 2) continue;
       
-      const rs = this.calculateRS(prices, marketPerformance);
+      const rs = this.calculateRS(prices, marketPerformances);
       
       if (rs !== null) {
         rsResults.push({
           symbol,
           rs,
           pricePerformance: this.calculatePricePerformance(prices),
-          latestPrice: prices[prices.length - 1]
+          latestPrice: prices[prices.length - 1],
+          benchmarkUsed: marketPerformances.benchmarkSymbol
         });
       }
     }
@@ -91,7 +97,7 @@ class RelativeStrengthService {
     // 데이터베이스에 RS 결과 저장
     await this.saveRSResults(rsResults, market);
     
-    console.log(`${market} 시장 RS 계산 완료: ${rsResults.length}개 종목`);
+    console.log(`${market} 시장 RS 계산 완료: ${rsResults.length}개 종목 (벤치마크: ${marketPerformances.benchmarkSymbol})`);
   }
 
   /**
@@ -111,31 +117,51 @@ class RelativeStrengthService {
   }
 
   /**
-   * 시장 평균 성과 계산
+   * 실제 시장 지수 기반 벤치마크 성과 조회
    */
-  calculateMarketPerformance(groupedBySymbol) {
-    const performances = [];
-    
-    for (const [symbol, prices] of Object.entries(groupedBySymbol)) {
-      if (prices.length < 2) continue;
+  async getMarketBenchmarkPerformances(market) {
+    try {
+      const periods = [5, 10, 20, 30];
+      const performances = {};
       
-      const firstPrice = prices[0].closePrice;
-      const lastPrice = prices[prices.length - 1].closePrice;
-      const performance = ((lastPrice - firstPrice) / firstPrice) * 100;
+      for (const period of periods) {
+        const benchmarkData = await indexDataService.getMarketBenchmarkPerformance(market, period);
+        
+        if (benchmarkData && benchmarkData.performance !== null) {
+          performances[`${period}d`] = benchmarkData.performance;
+        }
+      }
       
-      performances.push(performance);
+      if (Object.keys(performances).length === 0) {
+        return null;
+      }
+      
+      // 시장별 벤치마크 심볼 정보도 포함
+      const benchmarkMap = {
+        'NAS': 'QQQ',
+        'NYS': 'SPY', 
+        'AMS': 'SPY'
+      };
+      
+      return {
+        market: market,
+        benchmarkSymbol: benchmarkMap[market] || 'SPY',
+        periodPerformances: performances
+      };
+      
+    } catch (error) {
+      console.error(`${market} 시장 벤치마크 성과 조회 실패:`, error);
+      return null;
     }
-    
-    return performances.length > 0 ? performances.reduce((sum, p) => sum + p, 0) / performances.length : 0;
   }
 
   /**
-   * RS (Relative Strength) 계산
+   * RS (Relative Strength) 계산 - 실제 시장 지수 기반
    */
-  calculateRS(prices, marketPerformance) {
-    if (prices.length < 2) return null;
+  calculateRS(prices, marketBenchmark) {
+    if (prices.length < 2 || !marketBenchmark) return null;
     
-    const periods = [5, 10, 20, 30]; // 다양한 기간의 성과 계산
+    const periods = [5, 10, 20, 30];
     let totalRS = 0;
     let validPeriods = 0;
     
@@ -147,11 +173,16 @@ class RelativeStrengthService {
       
       const stockPerformance = ((endPrice - startPrice) / startPrice) * 100;
       
-      // RS = 종목 성과 - 시장 성과
-      const rs = stockPerformance - marketPerformance;
+      // 해당 기간의 시장 성과 가져오기
+      const marketPerformance = marketBenchmark.periodPerformances[`${period}d`];
       
-      totalRS += rs;
-      validPeriods++;
+      if (marketPerformance !== undefined) {
+        // RS = 종목 성과 - 실제 시장 지수 성과
+        const rs = stockPerformance - marketPerformance;
+        
+        totalRS += rs;
+        validPeriods++;
+      }
     }
     
     return validPeriods > 0 ? totalRS / validPeriods : null;
@@ -197,7 +228,8 @@ class RelativeStrengthService {
             $set: {
               relativeStrength: result.rs,
               relativeStrengthRank: i + 1,
-              pricePerformance: result.pricePerformance
+              pricePerformance: result.pricePerformance,
+              benchmarkUsed: result.benchmarkUsed // 사용된 벤치마크 정보 추가
             }
           },
           { upsert: true }

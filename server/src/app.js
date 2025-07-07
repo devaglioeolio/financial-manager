@@ -20,6 +20,7 @@ const { createMissingSnapshotsForAllUsers } = require('./services/dailySnapshotS
 const tokenManager = require('./services/koreaInvestmentToken');
 const websocketProxy = require('./services/websocketProxy');
 const simpleRSService = require('./services/simpleRSService');
+const indexDataService = require('./services/indexDataService');
 
 // 환경변수 설정
 dotenv.config();
@@ -107,6 +108,9 @@ mongoose.connect(process.env.MONGO_URI, {
   
   // Simple RS 서비스 초기화
   simpleRSService.initialize();
+  
+  // 시장 지수 데이터 서비스 초기화 (스케줄러는 constructor에서 자동 시작)
+  console.log('📊 시장 지수 데이터 서비스 초기화 완료');
   
   // 서버 시작 시 누락된 스냅샷들을 백필 (최근 7일)
   setTimeout(async () => {
